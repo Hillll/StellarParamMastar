@@ -18,7 +18,7 @@ import numpy as np
 import datetime, random, sys, time
 from scipy.stats import chisquare as sp_chi
 
-from functions import load_data, prepare_spectrum, mcmc_v2
+from functions import load_data, prepare_spectrum, mcmc, point_estimates
 from spd_setup import spd_setup
 
 from math import pi
@@ -32,10 +32,6 @@ t0 = time.time()
 
 # instantiate params
 var = spd_setup()
-'''
-if not var.alpha:
-    marcs_mods = synth_models('marcs')
-    bosz_mods = synth_models('bosz')'''
 
 # instantiate params
 var = spd_setup()
@@ -65,30 +61,25 @@ for c, i in enumerate(targets[:1]):
         # save data to blank file
         continue
 
-    temp = mcmc_v2(model='BOSZ', flux=clean_spec.corrected_flux_med, yerr=clean_spec.yerr,
+    temp = mcmc(model='BOSZ', flux=clean_spec.corrected_flux_med, yerr=clean_spec.yerr,
                      meta_data=mast_data.meta_data[c], parallel=True)
-    temp.starting()
-    sampler = temp.sample()
-'''
-    # run mcmc
-    mcmc_temp = mcmc(model='BOSZ', flux=clean_spec.corrected_flux_med, yerr=clean_spec.yerr,
-                     meta_data=mast_data.meta_data[c], marcs_mods=marcs_mods, bosz_mods=bosz_mods)
-    mcmc_temp.starting()    # generate starting values for each set of walkers
-    sampler = mcmc_temp.sample()
-'''
+    temp.starting()     # starting values for walkers
+    sampler = temp.sample()     # use emcee to sample param space
+
+    # get point estimates from chains
+    point = point_estimates(sampler, clean_spec)
+    point.params_err(teff='median', logg='median', zh='mode', alpha='mode')
+    # point.get_chi2()
+
+
+    #if var.plot:
+    #    point.plotting()
+
+
+
 print('\nTotal time taken: ', time.time() - t0)
 
 
-
-
-
-'''
-    # get point estimates from chains
-    point = point_estimates(sampler)
-    point.params_err(teff='median', logg='mode', zh='mode', alpha='mode')
-    point.get_chi2()
-    if var.plot:
-        point.plotting()'''
 '''
 ### Define functions
 def model_marcs(theta):  # model given a set of parameters (theta)

@@ -6,11 +6,12 @@ os.environ["NUMEXPR_NUM_THREADS"] = "1"
 os.environ["OMP_NUM_THREADS"] = "1"
 
 
-from pystellibs import Marcs_p0, Bosz
+from pystellibs_SPD import Marcs_p0, Bosz
 import numpy as np
 import pandas as pd
 import random
 import time
+import arviz, scipy
 from math import pi
 from spd_setup import spd_setup
 from astropy.io import fits
@@ -20,8 +21,7 @@ from ppxf.ppxf import ppxf
 import emcee
 import multiprocessing
 from multiprocessing import Pool
-# multiprocessing.set_start_method('fork')
-# from schwimmbad import MultiPool
+
 from corner import corner
 
 var = spd_setup()
@@ -415,7 +415,7 @@ class toy_func:
         spec = model_spec([5000, 3, 0], 'BOSZ')
         return len(spec)
 
-class mcmc_v2():
+class mcmc:
     """The functions required for running emcee."""
 
     def __init__(self, model, flux, yerr, meta_data, parallel=True):
@@ -470,11 +470,11 @@ class mcmc_v2():
     @staticmethod
     def lnprob(theta, model, flux, yerr, meta_data):  # posterior probability bosz
         t0 = time.time()
-        lp = mcmc_v2.lnprior(theta, model, meta_data)
+        lp = mcmc.lnprior(theta, model, meta_data)
         if not np.isfinite(lp):
             return -np.inf
-        temp = lp + mcmc_v2.lnlike(theta, model, flux, yerr)
-        print('Time on cpu {}: {}'.format(multiprocessing.current_process().name, time.time() - t0))
+        temp = lp + mcmc.lnlike(theta, model, flux, yerr)
+        # print('Time on cpu {}: {}'.format(multiprocessing.current_process().name, time.time() - t0))
         return temp
 
     @staticmethod
@@ -518,6 +518,68 @@ class mcmc_v2():
             LnLike = -0.5 * np.sum(np.log(2 * pi * (yerr ** 2)) + t[mask]) / len(yerr)
             return LnLike
 
+class point_estimates:
+
+    def __init__(self, sampler, prepare_spectrum):
+        self.params = []
+        self.sampler = sampler
+        self.alpha = var.alpha
+
+        # remove burnin and flatten chain to 1D
+        samples_flat = self.sampler.chain
+        samples_cut = samples_flat[:, var.burnin:, :]
+        self.samples_clean = samples_cut.reshape((-1, 3))
+
+        # data from 'clean_spec' instance.
+        self.mast_flux = prepare_spectrum.corrected_flux_med
+        self.yerr = prepare_spectrum.yerr
+
+
+    @staticmethod
+    def get_median(chain):
+        pcntiles = np.percentile(chain, [16, 50, 84])
+        q = np.diff(pcntiles)
+        return [pcntiles[1], q[0], q[1]]
+
+    @staticmethod
+    def get_mode(chain):
+        X = np.linspace(min(chain), max(chain))
+        func = scipy.stats.gaussian_kde(chain)
+        mode = X[np.argmax(func(X))]
+
+        mode_err_dn = (mode - arviz.hdi(chain, 0.32)[0])
+        mode_err_up = (arviz.hdi(chain, 0.32)[1] - mode)
+        return [mode, mode_err_dn, mode_err_up]
+
+    def get_chi2(self):
+        self.chi = np.sum(((self.mast_flux - model_flux) ** 2 / error ** 2))
+        return self.chi
+
+
+    def params_err(self, teff='median', logg='mode', zh='mode', alpha='mode'):
+        """calculate the median or mode of the distribution, depending on what is required.
+        Also returns errors"""
+
+        for c, i in enumerate(self.samples_clean[:].T):  # assuming order of params is: teff, logg, zh, alpha
+            if c == 0 and teff == 'median':
+                self.params.append(self.get_median(i))
+            elif c == 0 and teff == 'mode':
+                self.params.append(self.get_mode(i))
+
+            if c == 1 and logg == 'median':
+                self.params.append(self.get_median(i))
+            elif c == 1 and logg == 'mode':
+                self.params.append(self.get_mode(i))
+
+            if c == 2 and zh == 'median':
+                self.params.append(self.get_median(i))
+            elif c == 2 and zh == 'mode':
+                self.params.append(self.get_mode(i))
+
+            if c == 3 and alpha == 'median':
+                self.params.append(self.get_median(i))
+            elif c == 3 and alpha == 'mode':
+                self.params.append(self.get_mode(i))
 
 
 '''
