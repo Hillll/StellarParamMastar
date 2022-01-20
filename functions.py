@@ -9,6 +9,7 @@ os.environ["OMP_NUM_THREADS"] = "1"
 from pystellibs_SPD import Marcs_p0, Bosz
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
 import random
 import time
 import arviz, scipy
@@ -519,9 +520,11 @@ class mcmc:
             return LnLike
 
 class point_estimates:
+    """Use the sampler output to calculate point estimate parameters and their errors."""
 
-    def __init__(self, sampler, prepare_spectrum):
+    def __init__(self, sampler, spec_info):
         self.params = []
+        self.chi = {}
         self.sampler = sampler
         self.alpha = var.alpha
 
@@ -531,29 +534,50 @@ class point_estimates:
         self.samples_clean = samples_cut.reshape((-1, 3))
 
         # data from 'clean_spec' instance.
-        self.mast_flux = prepare_spectrum.corrected_flux_med
-        self.yerr = prepare_spectrum.yerr
+        self.mast_flux = spec_info.corrected_flux_med
+        self.yerr = spec_info.yerr
 
 
     @staticmethod
     def get_median(chain):
+        """Median of the posterior for a given parameters"""
         pcntiles = np.percentile(chain, [16, 50, 84])
         q = np.diff(pcntiles)
         return [pcntiles[1], q[0], q[1]]
 
     @staticmethod
     def get_mode(chain):
+        """Mode of the posterior for a given parameters"""
         X = np.linspace(min(chain), max(chain))
         func = scipy.stats.gaussian_kde(chain)
         mode = X[np.argmax(func(X))]
-
+        # calculate the errors using credible intervals
         mode_err_dn = (mode - arviz.hdi(chain, 0.32)[0])
         mode_err_up = (arviz.hdi(chain, 0.32)[1] - mode)
         return [mode, mode_err_dn, mode_err_up]
 
-    def get_chi2(self):
-        self.chi = np.sum(((self.mast_flux - model_flux) ** 2 / error ** 2))
-        return self.chi
+    def get_chi2(self, model):
+        """Get chi2 based on the point estimate parameters and append to chi dictionary for later comparison."""
+        if self.alpha:
+            model_flux = model_spec([self.params_err([0][0]), self.params_err([1][0]), self.params_err([2][0]),
+                                     self.params_err([4][0])], model)
+            sol = (ppxf(model_flux, self.mast_flux, noise=self.yerr, velscale=var.velscale, start=var.start, degree=-1,
+                        mdegree=var.mdegree, moments=var.moments, quiet=True))
+            ppxf_fit = sol.bestfit
+            # append chi2 to the chi dictionary
+            self.chi['chi_'+model] = np.sum(((self.mast_flux - ppxf_fit) ** 2 /
+                                             self.yerr ** 2))/(len(self.mast_flux-var.ndim))
+            return self.chi
+        else:
+            print()
+            model_flux = model_spec([self.params[0][0], self.params[1][0], self.params[2][0]], model)
+            sol = (ppxf(model_flux, self.mast_flux, noise=self.yerr, velscale=var.velscale, start=var.start, degree=-1,
+                        mdegree=var.mdegree, moments=var.moments, quiet=True))
+            ppxf_fit = sol.bestfit
+            # append chi2 to the chi dictionary
+            self.chi['chi_'+model] = np.sum(((self.mast_flux - ppxf_fit) ** 2 /
+                                             self.yerr ** 2))/(len(self.mast_flux-var.ndim))
+            return self.chi
 
 
     def params_err(self, teff='median', logg='mode', zh='mode', alpha='mode'):
@@ -561,6 +585,7 @@ class point_estimates:
         Also returns errors"""
 
         for c, i in enumerate(self.samples_clean[:].T):  # assuming order of params is: teff, logg, zh, alpha
+            print(c)
             if c == 0 and teff == 'median':
                 self.params.append(self.get_median(i))
             elif c == 0 and teff == 'mode':
@@ -582,16 +607,41 @@ class point_estimates:
                 self.params.append(self.get_mode(i))
 
 
-'''
+
 class plotting:
-    
+    """If var.plot == True, then plot bestfit, corner and trace."""
+    def __init__(self, sampler, point_estimates, spec_info):
+        if not os.path.exists(var.plots_output_direc+):
+            os.makedirs(folder)
 
-def chi2_lh(data, model, error):
-    chi = np.sum(((data - model) ** 2 / error ** 2))
-    return chi
+        # get plate, ifu and mjd from mast data for saving data and plots.
+        self.samples_clean = point_estimates.samples_clean
 
+    def trace(self):
+        plt.figure(figsize=(16, 30))
+        plt.subplot(var.ndim, 1, 1)
+        plt.plot(self.samples_clean.chain.T[0], '--', color='k', alpha=0.3)
+        plt.tick_params(axis='both', which='major', labelsize=10)
+        plt.ylabel('Effective Temperature (Kelvin)', fontsize=16)
+        plt.xlabel('Iterations', fontsize=16)
 
-def max_post(samp):
-    X = np.linspace(min(samp), max(samp))
-    func = scipy.stats.gaussian_kde(samp)
-    return X[np.argmax(func(X))]'''
+        plt.subplot(var.ndim, 1, 2)
+        plt.plot(self.samples_clean.chain.T[1], '--', color='k', alpha=0.3)
+        plt.tick_params(axis='both', which='major', labelsize=10)
+        plt.ylabel('Log g', fontsize=16)
+        plt.xlabel('Iterations', fontsize=16)
+
+        plt.subplot(var.ndim, 1, 3)
+        plt.plot(self.samples_clean.chain.T[2], '--', color='k', alpha=0.3)
+        plt.tick_params(axis='both', which='major', labelsize=10)
+        plt.ylabel('Metallicity ([Fe/H])', fontsize=16)
+        plt.xlabel('Iterations', fontsize=16)
+
+        if var.alpha:
+            plt.subplot(var.ndim, 1, 4)
+            plt.plot(self.samples_clean.chain.T[3], '--', color='k', alpha=0.3)
+            plt.tick_params(axis='both', which='major', labelsize=10)
+            plt.ylabel(r'Alpha abundance $([\alpha/Fe])$', fontsize=16)
+            plt.xlabel('Iterations', fontsize=16)
+
+        plt.savefig(var.plots_output_direc+mast_data., bbox_inches='tight')

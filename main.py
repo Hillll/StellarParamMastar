@@ -15,23 +15,14 @@ os.environ["NUMEXPR_NUM_THREADS"] = "1"
 os.environ["OMP_NUM_THREADS"] = "1"
 
 import numpy as np
-import datetime, random, sys, time
-from scipy.stats import chisquare as sp_chi
-
+import sys, time
 from functions import load_data, prepare_spectrum, mcmc, point_estimates
 from spd_setup import spd_setup
 
-from math import pi
-from scipy.constants import c
-
-import time
 t0 = time.time()
 
 target_num = int(sys.argv[1])   # used to select array of spectra to analyse
 t0 = time.time()
-
-# instantiate params
-var = spd_setup()
 
 # instantiate params
 var = spd_setup()
@@ -69,11 +60,11 @@ for c, i in enumerate(targets[:1]):
     # get point estimates from chains
     point = point_estimates(sampler, clean_spec)
     point.params_err(teff='median', logg='median', zh='mode', alpha='mode')
-    # point.get_chi2()
+    point.get_chi2(model='BOSZ')
 
+    # if mast_data.meta_data[c]['minTEFF_gaia'] > 5000:       #skip to next object if min teff est is high
+    # if var.plot:
 
-    #if var.plot:
-    #    point.plotting()
 
 
 

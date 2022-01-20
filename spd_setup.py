@@ -6,14 +6,20 @@ class spd_setup:
     def __init__(self):
         # directories
         self.data_direc = '/home/lewishill/Downloads/'
-        self.output_direc = '/mnt/lustre/lhill/shera/mcmc/spd/output/'
+        self.output_direc = '/home/lewishill/PycharmProjects/SPD'
+        self.plots_output_direc = '/home/lewishill/PycharmProjects/SPD/plots/'
 
         self.spec_file = 'mastar-goodspec-v3_1_1-v1_7_7.fits'
         self.est_file = 'mastar-goodspec-mpl11-gaia-DT-v2-mpl11-v3_1_1-v1_7_5.fits'
         self.nums_file = 'nums_todo.npz'   # ndarray of monotonically increasing values
-        
 
+        # input options
         self.alpha = False
+
+        # output options
+        self.plot= True
+        self.save_chains = False
+        self.save_params = True
 
         # mcmc params
         if self.alpha:
@@ -21,7 +27,7 @@ class spd_setup:
         else:
             self.ndim = 3
         self.nwalkers = 10
-        self.niter = 30
+        self.niter = 10
         self.burnin = 30
         self.a = 5
 
