@@ -16,7 +16,7 @@ os.environ["OMP_NUM_THREADS"] = "1"
 
 import numpy as np
 import sys, time
-from functions import load_data, prepare_spectrum, mcmc, point_estimates
+from functions import load_data, prepare_spectrum, mcmc, point_estimates, plotting
 from spd_setup import spd_setup
 
 t0 = time.time()
@@ -62,8 +62,9 @@ for c, i in enumerate(targets[:1]):
     point.params_err(teff='median', logg='median', zh='mode', alpha='mode')
     point.get_chi2(model='BOSZ')
 
-    # if mast_data.meta_data[c]['minTEFF_gaia'] > 5000:       #skip to next object if min teff est is high
-    # if var.plot:
+    if mast_data.meta_data[c]['minTEFF_gaia'] > 5000:       #skip to next object if min teff est is high
+        if var.plot:
+            plot_bosz = plotting(sampler, point, clean_spec, mast_data, c, model='BOSZ')
 
 
 

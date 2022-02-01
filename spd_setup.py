@@ -6,7 +6,7 @@ class spd_setup:
     def __init__(self):
         # directories
         self.data_direc = '/home/lewishill/Downloads/'
-        self.output_direc = '/home/lewishill/PycharmProjects/SPD'
+        self.output_direc = '/home/lewishill/PycharmProjects/SPD/'
         self.plots_output_direc = '/home/lewishill/PycharmProjects/SPD/plots/'
 
         self.spec_file = 'mastar-goodspec-v3_1_1-v1_7_7.fits'
@@ -17,7 +17,7 @@ class spd_setup:
         self.alpha = False
 
         # output options
-        self.plot= True
+        self.plot = True
         self.save_chains = False
         self.save_params = True
 

@@ -610,38 +610,47 @@ class point_estimates:
 
 class plotting:
     """If var.plot == True, then plot bestfit, corner and trace."""
-    def __init__(self, sampler, point_estimates, spec_info):
-        if not os.path.exists(var.plots_output_direc+):
-            os.makedirs(folder)
+    def __init__(self, sampler, point_estimates, spec_info, mast_data, c, model):
+        self.model = model
+        self.pim = str(mast_data.meta_data[c]['PLATE'])+'_'+str(mast_data.meta_data[c]['IFUDESIGN'])+'_'+\
+                   str(mast_data.meta_data[c]['MJD'])
+
+        if not os.path.exists(var.plots_output_direc + self.pim):
+            os.makedirs(var.plots_output_direc + self.pim)
 
         # get plate, ifu and mjd from mast data for saving data and plots.
         self.samples_clean = point_estimates.samples_clean
+        plotting.trace(self)
+
+
 
     def trace(self):
         plt.figure(figsize=(16, 30))
         plt.subplot(var.ndim, 1, 1)
-        plt.plot(self.samples_clean.chain.T[0], '--', color='k', alpha=0.3)
+        plt.plot(self.samples_clean.T[0], '--', color='k', alpha=0.3)
         plt.tick_params(axis='both', which='major', labelsize=10)
         plt.ylabel('Effective Temperature (Kelvin)', fontsize=16)
         plt.xlabel('Iterations', fontsize=16)
 
         plt.subplot(var.ndim, 1, 2)
-        plt.plot(self.samples_clean.chain.T[1], '--', color='k', alpha=0.3)
+        plt.plot(self.samples_clean.T[1], '--', color='k', alpha=0.3)
         plt.tick_params(axis='both', which='major', labelsize=10)
         plt.ylabel('Log g', fontsize=16)
         plt.xlabel('Iterations', fontsize=16)
 
         plt.subplot(var.ndim, 1, 3)
-        plt.plot(self.samples_clean.chain.T[2], '--', color='k', alpha=0.3)
+        plt.plot(self.samples_clean.T[2], '--', color='k', alpha=0.3)
         plt.tick_params(axis='both', which='major', labelsize=10)
         plt.ylabel('Metallicity ([Fe/H])', fontsize=16)
         plt.xlabel('Iterations', fontsize=16)
 
         if var.alpha:
             plt.subplot(var.ndim, 1, 4)
-            plt.plot(self.samples_clean.chain.T[3], '--', color='k', alpha=0.3)
+            plt.plot(self.samples_clean.T[3], '--', color='k', alpha=0.3)
             plt.tick_params(axis='both', which='major', labelsize=10)
             plt.ylabel(r'Alpha abundance $([\alpha/Fe])$', fontsize=16)
             plt.xlabel('Iterations', fontsize=16)
 
-        plt.savefig(var.plots_output_direc+mast_data., bbox_inches='tight')
+        plt.tight_layout()
+        plt.savefig(var.plots_output_direc + self.pim + '/' + self.model + '_trace.png', bbox_inches='tight')
+
