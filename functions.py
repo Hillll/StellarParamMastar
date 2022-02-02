@@ -10,6 +10,7 @@ from pystellibs_SPD import Marcs_p0, Bosz
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 import random
 import time
 import arviz, scipy
@@ -109,11 +110,14 @@ class load_data:
         self.plate_1, self.ifu_1, self.mjd_1 = header[1].data['plate'][start:end + 1], header[1].data['ifudesign'][
                                                                                        start:end + 1], \
                                                header[1].data['mjd'][start:end + 1]
-        # self.ifu_1 = np.asarray([int(i) for i in self.ifu_1])   # ensure ifu is int
+        self.ifu_1 = np.asarray([int(i) for i in self.ifu_1])   # ensure ifu is int
         self.ra, self.dec = header[1].data['ra'][start:end + 1], header[1].data['dec'][start:end + 1]
         self.wave, self.flux = header[1].data['wave'][0][9:-8], header[1].data['flux'][start:end + 1]
         self.ivar, self.exptime = header[1].data['ivar'][start:end + 1], header[1].data['exptime'][start:end + 1]
         header.close()
+
+        self.pim = [int(str((self.plate_1[i])) + str((self.ifu_1[i])) + str((self.mjd_1[i]))) for i in
+                    range(len(self.plate_1))]
 
     def get_estimates(self, start=0, end=1000):
         # if not isinstance(plate, array)
@@ -522,16 +526,18 @@ class mcmc:
 class point_estimates:
     """Use the sampler output to calculate point estimate parameters and their errors."""
 
-    def __init__(self, sampler, spec_info):
-        self.params = []
+    def __init__(self, sampler, spec_info, pim):
+        self.params = {}
         self.chi = {}
+        self.ppxf_fit = {}
         self.sampler = sampler
+        self.pim = pim
         self.alpha = var.alpha
 
         # remove burnin and flatten chain to 1D
         samples_flat = self.sampler.chain
-        samples_cut = samples_flat[:, var.burnin:, :]
-        self.samples_clean = samples_cut.reshape((-1, 3))
+        self.samples_cut = samples_flat[:, var.burnin:, :]
+        self.samples_clean = self.samples_cut.reshape((-1, 3))
 
         # data from 'clean_spec' instance.
         self.mast_flux = spec_info.corrected_flux_med
@@ -552,105 +558,188 @@ class point_estimates:
         func = scipy.stats.gaussian_kde(chain)
         mode = X[np.argmax(func(X))]
         # calculate the errors using credible intervals
-        mode_err_dn = (mode - arviz.hdi(chain, 0.32)[0])
-        mode_err_up = (arviz.hdi(chain, 0.32)[1] - mode)
+        mode_err_dn = (mode - arviz.hdi(chain, 0.68)[0])
+        mode_err_up = (arviz.hdi(chain, 0.68)[1] - mode)
         return [mode, mode_err_dn, mode_err_up]
+
+    def params_err(self, model, teff='median', logg='mode', zh='mode', alpha='mode'):
+        """calculate the median or mode of the distribution, depending on what is required.
+        Also returns errors"""
+        params_temp = []
+        for c, i in enumerate(self.samples_clean[:].T):  # assuming order of params is: teff, logg, met, alpha
+            if c == 0 and teff == 'median':
+                params_temp.append(self.get_median(i))
+            elif c == 0 and teff == 'mode':
+                params_temp.append(self.get_mode(i))
+
+            if c == 1 and logg == 'median':
+                params_temp.append(self.get_median(i))
+            elif c == 1 and logg == 'mode':
+                params_temp.append(self.get_mode(i))
+
+            if c == 2 and zh == 'median':
+                params_temp.append(self.get_median(i))
+            elif c == 2 and zh == 'mode':
+                params_temp.append(self.get_mode(i))
+
+            if c == 3 and alpha == 'median':
+                params_temp.append(self.get_median(i))
+            elif c == 3 and alpha == 'mode':
+                params_temp.append(self.get_mode(i))
+        params_temp = np.asarray(params_temp)
+        self.params[model] = params_temp
+
+    def get_model_fit(self, model):
+        """Get polynomial corrected model fit from pPXF."""
+        if self.alpha:
+            model_flux = model_spec([self.params[model][0][0], self.params[model][1][0], self.params[model][2][0]],
+                                    self.params[model][3][0], model)
+            sol = (ppxf(model_flux, self.mast_flux, noise=self.yerr, velscale=var.velscale, start=var.start, degree=-1,
+                        mdegree=var.mdegree, moments=var.moments, quiet=True))
+            bestfit_model = sol.bestfit
+            self.ppxf_fit['fit_' + model] = bestfit_model      # append fit to the ppxf fit dictionary
+            return self.ppxf_fit
+        else:
+            model_flux = model_spec([self.params[model][0][0], self.params[model][1][0], self.params[model][2][0]],
+                                    model)
+            sol = (ppxf(model_flux, self.mast_flux, noise=self.yerr, velscale=var.velscale, start=var.start, degree=-1,
+                        mdegree=var.mdegree, moments=var.moments, quiet=True))
+            bestfit_model = sol.bestfit
+            self.ppxf_fit['fit_' + model] = bestfit_model  # append fit to the ppxf fit dictionary
+            return self.ppxf_fit
 
     def get_chi2(self, model):
         """Get chi2 based on the point estimate parameters and append to chi dictionary for later comparison."""
-        if self.alpha:
-            model_flux = model_spec([self.params_err([0][0]), self.params_err([1][0]), self.params_err([2][0]),
-                                     self.params_err([4][0])], model)
-            sol = (ppxf(model_flux, self.mast_flux, noise=self.yerr, velscale=var.velscale, start=var.start, degree=-1,
-                        mdegree=var.mdegree, moments=var.moments, quiet=True))
-            ppxf_fit = sol.bestfit
-            # append chi2 to the chi dictionary
-            self.chi['chi_'+model] = np.sum(((self.mast_flux - ppxf_fit) ** 2 /
-                                             self.yerr ** 2))/(len(self.mast_flux-var.ndim))
-            return self.chi
-        else:
-            print()
-            model_flux = model_spec([self.params[0][0], self.params[1][0], self.params[2][0]], model)
-            sol = (ppxf(model_flux, self.mast_flux, noise=self.yerr, velscale=var.velscale, start=var.start, degree=-1,
-                        mdegree=var.mdegree, moments=var.moments, quiet=True))
-            ppxf_fit = sol.bestfit
-            # append chi2 to the chi dictionary
-            self.chi['chi_'+model] = np.sum(((self.mast_flux - ppxf_fit) ** 2 /
-                                             self.yerr ** 2))/(len(self.mast_flux-var.ndim))
-            return self.chi
+        self.chi['chi_' + model] = np.sum(((self.mast_flux - self.ppxf_fit['fit_' + model]) ** 2 /
+                                                self.yerr ** 2)) / (len(self.mast_flux - var.ndim))
+        return self.chi
 
-
-    def params_err(self, teff='median', logg='mode', zh='mode', alpha='mode'):
-        """calculate the median or mode of the distribution, depending on what is required.
-        Also returns errors"""
-
-        for c, i in enumerate(self.samples_clean[:].T):  # assuming order of params is: teff, logg, zh, alpha
-            print(c)
-            if c == 0 and teff == 'median':
-                self.params.append(self.get_median(i))
-            elif c == 0 and teff == 'mode':
-                self.params.append(self.get_mode(i))
-
-            if c == 1 and logg == 'median':
-                self.params.append(self.get_median(i))
-            elif c == 1 and logg == 'mode':
-                self.params.append(self.get_mode(i))
-
-            if c == 2 and zh == 'median':
-                self.params.append(self.get_median(i))
-            elif c == 2 and zh == 'mode':
-                self.params.append(self.get_mode(i))
-
-            if c == 3 and alpha == 'median':
-                self.params.append(self.get_median(i))
-            elif c == 3 and alpha == 'mode':
-                self.params.append(self.get_mode(i))
-
+    def save_data(self, model):
+        if not os.path.exists(var.output_direc):
+            os.makedirs(var.output_direc)
+        np.savez(var.output_direc + str(self.pim) + '_' + model + '_params.npz', self.params)
+        np.savez(var.output_direc + str(self.pim) + '_' + model + '_chains.npz', self.samples_cut)
 
 
 class plotting:
     """If var.plot == True, then plot bestfit, corner and trace."""
-    def __init__(self, sampler, point_estimates, spec_info, mast_data, c, model):
+    def __init__(self, sampler, point_estimates, clean_spec, mast_data, c, model):
         self.model = model
-        self.pim = str(mast_data.meta_data[c]['PLATE'])+'_'+str(mast_data.meta_data[c]['IFUDESIGN'])+'_'+\
-                   str(mast_data.meta_data[c]['MJD'])
+        self.pim = mast_data.pim[c]
+        self.clean_spec = clean_spec
+        self.point_estimates = point_estimates
+        if not os.path.exists(var.plots_output_direc + str(self.pim)):
+            os.makedirs(var.plots_output_direc + str((self.pim)))
 
-        if not os.path.exists(var.plots_output_direc + self.pim):
-            os.makedirs(var.plots_output_direc + self.pim)
-
-        # get plate, ifu and mjd from mast data for saving data and plots.
-        self.samples_clean = point_estimates.samples_clean
-        plotting.trace(self)
-
+        plotting.trace(self)    # create trace plot and save
+        plotting.bestfit(self)   # create bestfit plot and save
+        plotting.corner(self)   # create corner plot and save
 
 
     def trace(self):
+        """Plot the trace for each parameter."""
+
         plt.figure(figsize=(16, 30))
         plt.subplot(var.ndim, 1, 1)
-        plt.plot(self.samples_clean.T[0], '--', color='k', alpha=0.3)
+        plt.plot(self.point_estimates.samples_cut[:,:,0].T, '--', color='k', alpha=0.3)
         plt.tick_params(axis='both', which='major', labelsize=10)
         plt.ylabel('Effective Temperature (Kelvin)', fontsize=16)
         plt.xlabel('Iterations', fontsize=16)
 
         plt.subplot(var.ndim, 1, 2)
-        plt.plot(self.samples_clean.T[1], '--', color='k', alpha=0.3)
+        plt.plot(self.point_estimates.samples_cut[:,:,1].T, '--', color='k', alpha=0.3)
         plt.tick_params(axis='both', which='major', labelsize=10)
         plt.ylabel('Log g', fontsize=16)
         plt.xlabel('Iterations', fontsize=16)
 
         plt.subplot(var.ndim, 1, 3)
-        plt.plot(self.samples_clean.T[2], '--', color='k', alpha=0.3)
+        plt.plot(self.point_estimates.samples_cut[:,:,2].T, '--', color='k', alpha=0.3)
         plt.tick_params(axis='both', which='major', labelsize=10)
         plt.ylabel('Metallicity ([Fe/H])', fontsize=16)
         plt.xlabel('Iterations', fontsize=16)
 
         if var.alpha:
             plt.subplot(var.ndim, 1, 4)
-            plt.plot(self.samples_clean.T[3], '--', color='k', alpha=0.3)
+            plt.plot(self.point_estimates.samples_cut[:,:,3].T, '--', color='k', alpha=0.3)
             plt.tick_params(axis='both', which='major', labelsize=10)
             plt.ylabel(r'Alpha abundance $([\alpha/Fe])$', fontsize=16)
             plt.xlabel('Iterations', fontsize=16)
 
         plt.tight_layout()
-        plt.savefig(var.plots_output_direc + self.pim + '/' + self.model + '_trace.png', bbox_inches='tight')
+        plt.savefig(var.plots_output_direc + str(self.pim) + '/' + self.model + '_trace.png', bbox_inches='tight')
+
+    def bestfit(self):
+        """Plot bestfit for model spec"""
+        fig, axes = plt.subplots(nrows=1, ncols=1, figsize=(30, 12), sharey=False, sharex=True)
+        axes.set_title('MaStar PIM: ' + str(self.pim), fontsize=32)
+        divider = make_axes_locatable(axes)
+        ax2 = divider.append_axes("bottom", size="36%", pad=0)
+        axes.figure.add_axes(ax2)
+        axes.plot(self.clean_spec.wave, self.clean_spec.corrected_flux_med, 'k', linewidth=3, label='MaStar spectrum')
+        axes.plot(self.clean_spec.wave, self.point_estimates.ppxf_fit['fit_BOSZ'], c='b', lw=2, label='BOSZ model')
+        if len(self.point_estimates.ppxf_fit) == 2:      # check if there's a MARCS solution
+            axes.plot(self.clean_spec.wave, self.point_estimates.ppxf_fit['fit_MARCS'], c='r', lw=2,
+                      label='MARCS model')
+        axes.legend(loc=0, fontsize=20)
+        axes.set_ylabel('Relative flux', fontsize=25)
+        axes.tick_params(axis='both', which='major', labelsize=20, direction='in')
+
+        ax2.plot(self.clean_spec.wave, self.clean_spec.corrected_flux_med - self.point_estimates.ppxf_fit['fit_BOSZ'],
+                 c='b', lw=2)
+        if len(self.point_estimates.ppxf_fit) == 2:      # check if there's a MARCS solution
+            ax2.plot(self.clean_spec.wave, self.clean_spec.corrected_flux_med - self.point_estimates.ppxf_fit['fit_MARC\
+            S'], c='r', lw=2)
+        ax2.set_ylabel('Residual flux', fontsize=25)
+        ax2.set_xlabel(r'$Wavelength, \AA$', fontsize=25)
+        ax2.tick_params(axis='both', which='major', labelsize=20, direction='in')
+        ax2.axhline(y=0, c='r', linestyle='--', lw=2)
+        axes.set_xticks([])
+        plt.tight_layout()
+        plt.savefig(var.plots_output_direc + str(self.pim) + '/bestfit.png', bbox_inches='tight')
+
+    def corner(self):
+        """Plot corner."""
+        plt.clf()
+        if var.alpha:
+            fig = corner(self.point_estimates.samples_clean, labels=["$T_{eff}$", "$log g$", "$[Fe/H]$", "[alpha/M]"],
+                         quantiles=None, show_titles=False, title_kwargs={"fontsize": 16},
+                         label_kwargs={"fontsize": 18}, color='b')
+        else:
+            fig = corner(self.point_estimates.samples_clean, labels=["$T_{eff}$", "$log g$", "$[Fe/H]$"],
+                         quantiles=None, show_titles=False, title_kwargs={"fontsize": 16},
+                         label_kwargs={"fontsize": 18}, color='b')
+        axes = np.array(fig.axes).reshape((var.ndim, var.ndim))   # Extract the axes
+        for i in range(var.ndim):       # Loop over the diagonal
+            ax = axes[i, i]
+            if i == 0:
+                ax.set_title('$T_{eff} = %d^{+%d}_{-%d}$K' % (
+                    np.round(self.point_estimates.params[i][0], 0), np.round(self.point_estimates.params[i][2], 0),
+                    np.round(self.point_estimates.params[i][1], 0)), fontsize=14)
+            if i == 1:
+                ax.set_title('$Log g = %6.2f^{+%6.2f}_{-%6.2f}$K' % (
+                    np.round(self.point_estimates.params[i][0], 2), np.round(self.point_estimates.params[i][2], 2),
+                    np.round(self.point_estimates.params[i][1], 2)), fontsize=14)
+            if i == 2:
+                ax.set_title('$[Fe/H] = %6.2f^{+%6.2f}_{-%6.2f}$K' % (
+                    np.round(self.point_estimates.params[i][0], 2), np.round(self.point_estimates.params[i][2], 2),
+                    np.round(self.point_estimates.params[i][1], 2)), fontsize=14)
+            if i == 3:
+                ax.set_title('$[alpha/M] = %6.2f^{+%6.2f}_{-%6.2f}$K' % (
+                    np.round(self.point_estimates.params[i][0], 2), np.round(self.point_estimates.params[i][2], 2),
+                    np.round(self.point_estimates.params[i][1], 2)), fontsize=14)
+            ax.axvline(self.point_estimates.params[i][0], color="r")
+            ax.axvline(self.point_estimates.params[i][0] - self.point_estimates.params[i][2], color="k",
+                       linestyle='--')
+            ax.axvline(self.point_estimates.params[i][0] + self.point_estimates.params[i][1], color="k",
+                       linestyle='--')
+
+        for yi in range(var.ndim):      # Loop over the histograms
+            for xi in range(yi):
+                ax = axes[yi, xi]
+                ax.axvline(self.point_estimates.params[xi][0], color="r")
+                ax.axhline(self.point_estimates.params[yi][0], color="r")
+                ax.plot(self.point_estimates.params[xi][0], self.point_estimates.params[yi][0], "sr")
+
+        plt.tight_layout()
+        plt.savefig(var.plots_output_direc + str(self.pim) + '/' + self.model + '_corner.png', bbox_inches='tight')
 
