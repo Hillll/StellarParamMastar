@@ -5,7 +5,6 @@ os.environ["MKL_NUM_THREADS"] = "1"
 os.environ["NUMEXPR_NUM_THREADS"] = "1"
 os.environ["OMP_NUM_THREADS"] = "1"
 
-
 from pystellibs_SPD import Marcs_p0, Bosz
 import numpy as np
 import pandas as pd
@@ -27,72 +26,57 @@ from multiprocessing import Pool
 from corner import corner
 
 var = spd_setup()
+if var.alpha:
+    print('\nGetting models...')
+    from pystellibs_SPD import Marcs_m04, Marcs_p04
+    from pystellibs_SPD import Bosz_p03, Bosz_p05, Bosz_m03
 
-marcs_mods = Marcs_p0()
-bosz_mods = Bosz()
+    marcs_m04 = Marcs_m04()
+    marcs_p04 = Marcs_p04()
 
-def model_wave(theta, model):  # model given a set of parameters (theta)
-    t, g, z = theta
-    ap = (np.log10(t), g, 0, (10 ** (z)) * 0.02)  # try different normalisation
-    if model == 'bosz' or model == 'BOSZ':
-        wave = np.asarray(bosz_mods.wavelength)
-    elif model == 'marcs' or model == 'MARCS':
-        wave = np.asarray(marcs_mods.wavelength)
-    else:
-        raise Exception("Invalid model library.")
-    return wave
+    bosz_m03 = Bosz_m03()
+    bosz_p03 = Bosz_p03()
+    bosz_p05 = Bosz_p05()
+
+marcs_p0 = Marcs_p0()
+bosz_p0 = Bosz()
 
 
 def model_spec(theta, model):  # model given a set of parameters (theta)
-    t, g, z = theta
-    ap = (np.log10(t), g, 0, (10 ** (z)) * 0.02)  # try different normalisation
-    if model == 'bosz' or model == 'BOSZ':
-        flux = np.asarray(bosz_mods.generate_stellar_spectrum(*ap))
-    elif model == 'marcs' or model == 'MARCS':
-        flux = np.asarray(marcs_mods.generate_stellar_spectrum(*ap))
-    else:
-        raise Exception("Invalid model library.")
-    flux_med = flux / np.median(flux)
-    return flux_med
-
-
-'''
-
-marcs_mods = synth_models('marcs')
-bosz_mods = model_spec('bosz')
->>>>>>> 66c395c... update.
-
-class model_spec():
-    """Load either MARCS or BOSZ model atmospheres."""
-
-    def __init__(self, model):
-        self.model = model
-        self.marcs_mods = Marcs_p0()
-        self.bosz_mods = Bosz()
-
-    def model_wave(self, theta):  # model given a set of parameters (theta)
-        t, g, z = theta
+    if var.alpha:
+        t, g, z, a = theta
         ap = (np.log10(t), g, 0, (10 ** (z)) * 0.02)  # try different normalisation
-        if self.model == 'bosz' or self.model == 'BOSZ':
-            wave = np.asarray(self.bosz_mods.wavelength)
-        elif self.model == 'marcs' or self.model == 'MARCS':
-            wave = np.asarray(self.marcs_mods.wavelength)
+        if model == 'bosz' or model == 'BOSZ':
+            flux_m03 = bosz_m03.generate_stellar_spectrum(*ap)  # get alpha model for each combination of t,g,z
+            flux_p0 = bosz_p0.generate_stellar_spectrum(*ap)
+            flux_p03 = bosz_p03.generate_stellar_spectrum(*ap)
+            flux_p05 = bosz_p05.generate_stellar_spectrum(*ap)
+            f = interp1d([-0.25, 0, 0.25, 0.5], np.array([flux_m03, flux_p0, flux_p03, flux_p05]), kind='linear',
+                         axis=0)  # interpolate in alpha space
+        elif model == 'marcs' or model == 'MARCS':
+            flux_m04 = marcs_m04.generate_stellar_spectrum(*ap)
+            flux_p0 = marcs_p0.generate_stellar_spectrum(*ap)
+            flux_p04 = marcs_p04.generate_stellar_spectrum(*ap)
+            f = interp1d([-0.4, 0, 0.4], np.array([flux_m04, flux_p0, flux_p04]), kind='linear',
+                         axis=0)  # interpolate in alpha space
+            flux = np.asarray(marcs_p0.generate_stellar_spectrum(*ap))
         else:
             raise Exception("Invalid model library.")
-        return wave
+        flux_med = f(a) / np.median(f(a))
+        return flux_med
 
-    def model_spec(self, theta):  # model given a set of parameters (theta)
+    else:
         t, g, z = theta
         ap = (np.log10(t), g, 0, (10 ** (z)) * 0.02)  # try different normalisation
-        if self.model == 'bosz' or self.model == 'BOSZ':
-            flux = np.asarray(self.bosz_mods.generate_stellar_spectrum(*ap))
-        elif self.model == 'marcs' or self.model == 'MARCS':
-            flux = np.asarray(self.marcs_mods.generate_stellar_spectrum(*ap))
+        if model == 'bosz' or model == 'BOSZ':
+            flux = np.asarray(bosz_p0.generate_stellar_spectrum(*ap))
+        elif model == 'marcs' or model == 'MARCS':
+            flux = np.asarray(marcs_p0.generate_stellar_spectrum(*ap))
         else:
             raise Exception("Invalid model library.")
         flux_med = flux / np.median(flux)
         return flux_med
-'''
+
 
 class load_data:
     """Load mastar spectra and the estimates file from Gaia photometry."""
@@ -423,8 +407,8 @@ class toy_func:
 class mcmc:
     """The functions required for running emcee."""
 
-    def __init__(self, model, flux, yerr, meta_data, parallel=True):
-        self.model = model
+    def __init__(self, flux, yerr, meta_data, parallel=True):
+        self.sample_all = {}
         self.flux = flux
         self.yerr = yerr
         self.meta_data = meta_data
@@ -434,25 +418,30 @@ class mcmc:
     def starting(self):
         p0_ = []  # generate random starting points for the walkers, uniform across min and max priors
         for j in range(var.nwalkers):
-            temp = [random.uniform(self.meta_data['minTEFF_gaia'], self.meta_data['maxTEFF_gaia']),
-                    random.uniform(self.meta_data['minLOGG_gaia'], self.meta_data['maxLOGG_gaia']),
-                    random.uniform(-2.5, 0.5)]
+            if var.alpha:
+                temp = [random.uniform(self.meta_data['minTEFF_gaia'], self.meta_data['maxTEFF_gaia']),
+                        random.uniform(self.meta_data['minLOGG_gaia'], self.meta_data['maxLOGG_gaia']),
+                        random.uniform(-2.5, 0.5), random.uniform(-0.25, 0.4)]  # within marcs and bosz alpha range
+            else:
+                temp = [random.uniform(self.meta_data['minTEFF_gaia'], self.meta_data['maxTEFF_gaia']),
+                        random.uniform(self.meta_data['minLOGG_gaia'], self.meta_data['maxLOGG_gaia']),
+                        random.uniform(-2.5, 0.5)]
             p0_.append(temp)
         self.p0_ = np.asarray(p0_)
 
-    def sample(self):
-        print('\nRunning MCMC using {} models...'.format(self.model))
-        self.sampler = self.main()
-        return self.sampler
+    def sample(self, model):
+        print('\nRunning MCMC using {} models...'.format(model))
+        sampler = self.main(model)
+        self.sample_all[model] = sampler
+        self.sample_all
 
-    def main(self):  # The MCMC routine
+    def main(self, model):  # The MCMC routine
         if self.parallel == True:
             with Pool() as pool:
                 print(np.show_config())
                 sampler = emcee.EnsembleSampler(var.nwalkers, var.ndim, self.lnprob, a=var.a, pool=pool,
-                                                args=[self.model, self.flux, self.yerr, self.meta_data])
+                                                args=[model, self.flux, self.yerr, self.meta_data])
                 # Burn in
-                print(self.p0_, var.burnin)
                 p0_, _, _ = sampler.run_mcmc(self.p0_, var.burnin,
                                              progress=True)  # this diminishes the influence of starting values
                 print('\nFinished burn in.')
@@ -484,22 +473,44 @@ class mcmc:
 
     @staticmethod
     def lnprior(theta, model, meta_data):  # prior estimate of the data - flat
-        t, g, z = theta
-        if model == 'marcs' or model == 'MARCS':
-            if meta_data['minTEFF_gaia'] <= t <= meta_data['maxTEFF_gaia'] and \
-                    meta_data['minLOGG_gaia'] <= g <= meta_data['maxLOGG_gaia'] and \
-                    t > 2000 and -3 <= z <= 1:
-                return 1
-            else:
-                return -np.inf
+        if var.alpha:
+            t, g, z, a = theta
+            if model == 'marcs' or model == 'MARCS':
+                if meta_data['minTEFF_gaia'] <= t <= meta_data['maxTEFF_gaia'] and \
+                        meta_data['minLOGG_gaia'] <= g <= meta_data['maxLOGG_gaia'] and \
+                        t > 2500 and -2 <= z <= 1 and -0.4 <= a <= 0.4:
+                    return 1
+                elif meta_data['minTEFF_gaia'] <= t <= meta_data['maxTEFF_gaia'] and \
+                        meta_data['minLOGG_gaia'] <= g <= meta_data['maxLOGG_gaia'] and \
+                        t > 2500 and -2.5 <= z <= 1 and 0 <= a <= 0.4:
+                    return 1
+                else:
+                    return -np.inf
 
-        elif model == 'bosz' or model == 'BOSZ':
-            if meta_data['minTEFF_gaia'] <= t <= meta_data['maxTEFF_gaia'] and \
-                    meta_data['minLOGG_gaia'] <= g <= meta_data['maxLOGG_gaia'] and \
-                    t > 3500 and -3 <= z <= 0.5:
-                return 1
-            else:
-                return -np.inf
+            elif model == 'bosz' or model == 'BOSZ':
+                if meta_data['minTEFF_gaia'] <= t <= meta_data['maxTEFF_gaia'] and \
+                        meta_data['minLOGG_gaia'] <= g <= meta_data['maxLOGG_gaia'] and \
+                        t > 3500 and -2.5 <= z <= 0.5 and -0.25 <= a <= 0.5:
+                    return 1
+                else:
+                    return -np.inf
+        else:
+            t, g, z = theta
+            if model == 'marcs' or model == 'MARCS':
+                if meta_data['minTEFF_gaia'] <= t <= meta_data['maxTEFF_gaia'] and \
+                        meta_data['minLOGG_gaia'] <= g <= meta_data['maxLOGG_gaia'] and \
+                        t > 2000 and -3 <= z <= 1:
+                    return 1
+                else:
+                    return -np.inf
+
+            elif model == 'bosz' or model == 'BOSZ':
+                if meta_data['minTEFF_gaia'] <= t <= meta_data['maxTEFF_gaia'] and \
+                        meta_data['minLOGG_gaia'] <= g <= meta_data['maxLOGG_gaia'] and \
+                        t > 3500 and -3 <= z <= 0.5:
+                    return 1
+                else:
+                    return -np.inf
 
     @staticmethod
     def lnlike(theta, model, flux, yerr):  # likelihood fn that evaluates best fit
@@ -526,23 +537,23 @@ class mcmc:
 class point_estimates:
     """Use the sampler output to calculate point estimate parameters and their errors."""
 
-    def __init__(self, sampler, spec_info, pim):
+    def __init__(self, spec_info, pim):
         self.params = {}
         self.chi = {}
         self.ppxf_fit = {}
-        self.sampler = sampler
         self.pim = pim
         self.alpha = var.alpha
-
-        # remove burnin and flatten chain to 1D
-        samples_flat = self.sampler.chain
-        self.samples_cut = samples_flat[:, var.burnin:, :]
-        self.samples_clean = self.samples_cut.reshape((-1, 3))
 
         # data from 'clean_spec' instance.
         self.mast_flux = spec_info.corrected_flux_med
         self.yerr = spec_info.yerr
 
+    def flatchain(self, mcmc_run, model):
+        """remove burnin and flatten chain to 1D"""
+        samples_flat = mcmc_run.sample_all[model].chain
+        self.samples_cut = samples_flat[:, var.burnin:, :]
+        self.samples_clean = self.samples_cut.reshape((-1, var.ndim))
+        return self.samples_clean
 
     @staticmethod
     def get_median(chain):
@@ -592,12 +603,12 @@ class point_estimates:
     def get_model_fit(self, model):
         """Get polynomial corrected model fit from pPXF."""
         if self.alpha:
-            model_flux = model_spec([self.params[model][0][0], self.params[model][1][0], self.params[model][2][0]],
-                                    self.params[model][3][0], model)
+            model_flux = model_spec([self.params[model][0][0], self.params[model][1][0], self.params[model][2][0],
+                                    self.params[model][3][0]], model)
             sol = (ppxf(model_flux, self.mast_flux, noise=self.yerr, velscale=var.velscale, start=var.start, degree=-1,
                         mdegree=var.mdegree, moments=var.moments, quiet=True))
             bestfit_model = sol.bestfit
-            self.ppxf_fit['fit_' + model] = bestfit_model      # append fit to the ppxf fit dictionary
+            self.ppxf_fit[model] = bestfit_model      # append fit to the ppxf fit dictionary
             return self.ppxf_fit
         else:
             model_flux = model_spec([self.params[model][0][0], self.params[model][1][0], self.params[model][2][0]],
@@ -605,35 +616,36 @@ class point_estimates:
             sol = (ppxf(model_flux, self.mast_flux, noise=self.yerr, velscale=var.velscale, start=var.start, degree=-1,
                         mdegree=var.mdegree, moments=var.moments, quiet=True))
             bestfit_model = sol.bestfit
-            self.ppxf_fit['fit_' + model] = bestfit_model  # append fit to the ppxf fit dictionary
+            self.ppxf_fit[model] = bestfit_model  # append fit to the ppxf fit dictionary
             return self.ppxf_fit
 
     def get_chi2(self, model):
         """Get chi2 based on the point estimate parameters and append to chi dictionary for later comparison."""
-        self.chi['chi_' + model] = np.sum(((self.mast_flux - self.ppxf_fit['fit_' + model]) ** 2 /
-                                                self.yerr ** 2)) / (len(self.mast_flux - var.ndim))
+        self.chi[model] = np.sum(((self.mast_flux - self.ppxf_fit[model]) ** 2 / self.yerr ** 2)) / (len(self.mast_flux
+                                                                                                         - var.ndim))
         return self.chi
 
     def save_data(self, model):
         if not os.path.exists(var.output_direc):
             os.makedirs(var.output_direc)
-        np.savez(var.output_direc + str(self.pim) + '_' + model + '_params.npz', self.params)
+        np.savez(var.output_direc + str(self.pim) + '_' + model + '_params.npz', self.params[model], self.chi[model])
         np.savez(var.output_direc + str(self.pim) + '_' + model + '_chains.npz', self.samples_cut)
 
 
 class plotting:
     """If var.plot == True, then plot bestfit, corner and trace."""
-    def __init__(self, sampler, point_estimates, clean_spec, mast_data, c, model):
+    def __init__(self, point_estimates, clean_spec, mast_data, c, model):
         self.model = model
         self.pim = mast_data.pim[c]
         self.clean_spec = clean_spec
         self.point_estimates = point_estimates
-        if not os.path.exists(var.plots_output_direc + str(self.pim)):
-            os.makedirs(var.plots_output_direc + str((self.pim)))
+        if var.plot:
+            if not os.path.exists(var.plots_output_direc + str(self.pim)):
+                os.makedirs(var.plots_output_direc + str((self.pim)))
 
-        plotting.trace(self)    # create trace plot and save
-        plotting.bestfit(self)   # create bestfit plot and save
-        plotting.corner(self)   # create corner plot and save
+            plotting.trace(self)    # create trace plot and save
+            plotting.bestfit(self)   # create bestfit plot and save
+            plotting.corner(self)   # create corner plot and save
 
 
     def trace(self):
@@ -667,6 +679,7 @@ class plotting:
 
         plt.tight_layout()
         plt.savefig(var.plots_output_direc + str(self.pim) + '/' + self.model + '_trace.png', bbox_inches='tight')
+        plt.close()
 
     def bestfit(self):
         """Plot bestfit for model spec"""
@@ -676,19 +689,19 @@ class plotting:
         ax2 = divider.append_axes("bottom", size="36%", pad=0)
         axes.figure.add_axes(ax2)
         axes.plot(self.clean_spec.wave, self.clean_spec.corrected_flux_med, 'k', linewidth=3, label='MaStar spectrum')
-        axes.plot(self.clean_spec.wave, self.point_estimates.ppxf_fit['fit_BOSZ'], c='b', lw=2, label='BOSZ model')
+        axes.plot(self.clean_spec.wave, self.point_estimates.ppxf_fit['BOSZ'], c='b', lw=2, label='BOSZ model')
         if len(self.point_estimates.ppxf_fit) == 2:      # check if there's a MARCS solution
-            axes.plot(self.clean_spec.wave, self.point_estimates.ppxf_fit['fit_MARCS'], c='r', lw=2,
+            axes.plot(self.clean_spec.wave, self.point_estimates.ppxf_fit['MARCS'], c='r', lw=2,
                       label='MARCS model')
         axes.legend(loc=0, fontsize=20)
         axes.set_ylabel('Relative flux', fontsize=25)
         axes.tick_params(axis='both', which='major', labelsize=20, direction='in')
 
-        ax2.plot(self.clean_spec.wave, self.clean_spec.corrected_flux_med - self.point_estimates.ppxf_fit['fit_BOSZ'],
+        ax2.plot(self.clean_spec.wave, self.clean_spec.corrected_flux_med - self.point_estimates.ppxf_fit['BOSZ'],
                  c='b', lw=2)
         if len(self.point_estimates.ppxf_fit) == 2:      # check if there's a MARCS solution
-            ax2.plot(self.clean_spec.wave, self.clean_spec.corrected_flux_med - self.point_estimates.ppxf_fit['fit_MARC\
-            S'], c='r', lw=2)
+            ax2.plot(self.clean_spec.wave, self.clean_spec.corrected_flux_med - self.point_estimates.ppxf_fit['MARCS']
+                     , c='r', lw=2)
         ax2.set_ylabel('Residual flux', fontsize=25)
         ax2.set_xlabel(r'$Wavelength, \AA$', fontsize=25)
         ax2.tick_params(axis='both', which='major', labelsize=20, direction='in')
@@ -696,6 +709,7 @@ class plotting:
         axes.set_xticks([])
         plt.tight_layout()
         plt.savefig(var.plots_output_direc + str(self.pim) + '/bestfit.png', bbox_inches='tight')
+        plt.close()
 
     def corner(self):
         """Plot corner."""
@@ -713,33 +727,38 @@ class plotting:
             ax = axes[i, i]
             if i == 0:
                 ax.set_title('$T_{eff} = %d^{+%d}_{-%d}$K' % (
-                    np.round(self.point_estimates.params[i][0], 0), np.round(self.point_estimates.params[i][2], 0),
-                    np.round(self.point_estimates.params[i][1], 0)), fontsize=14)
+                    np.round(self.point_estimates.params[self.model][i][0], 0),
+                    np.round(self.point_estimates.params[self.model][i][2], 0),
+                    np.round(self.point_estimates.params[self.model][i][1], 0)), fontsize=14)
             if i == 1:
                 ax.set_title('$Log g = %6.2f^{+%6.2f}_{-%6.2f}$K' % (
-                    np.round(self.point_estimates.params[i][0], 2), np.round(self.point_estimates.params[i][2], 2),
-                    np.round(self.point_estimates.params[i][1], 2)), fontsize=14)
+                    np.round(self.point_estimates.params[self.model][i][0], 2),
+                    np.round(self.point_estimates.params[self.model][i][2], 2),
+                    np.round(self.point_estimates.params[self.model][i][1], 2)), fontsize=14)
             if i == 2:
                 ax.set_title('$[Fe/H] = %6.2f^{+%6.2f}_{-%6.2f}$K' % (
-                    np.round(self.point_estimates.params[i][0], 2), np.round(self.point_estimates.params[i][2], 2),
-                    np.round(self.point_estimates.params[i][1], 2)), fontsize=14)
+                    np.round(self.point_estimates.params[self.model][i][0], 2),
+                    np.round(self.point_estimates.params[self.model][i][2], 2),
+                    np.round(self.point_estimates.params[self.model][i][1], 2)), fontsize=14)
             if i == 3:
                 ax.set_title('$[alpha/M] = %6.2f^{+%6.2f}_{-%6.2f}$K' % (
-                    np.round(self.point_estimates.params[i][0], 2), np.round(self.point_estimates.params[i][2], 2),
-                    np.round(self.point_estimates.params[i][1], 2)), fontsize=14)
-            ax.axvline(self.point_estimates.params[i][0], color="r")
-            ax.axvline(self.point_estimates.params[i][0] - self.point_estimates.params[i][2], color="k",
-                       linestyle='--')
-            ax.axvline(self.point_estimates.params[i][0] + self.point_estimates.params[i][1], color="k",
-                       linestyle='--')
+                    np.round(self.point_estimates.params[self.model][i][0], 2),
+                    np.round(self.point_estimates.params[self.model][i][2], 2),
+                    np.round(self.point_estimates.params[self.model][i][1], 2)), fontsize=14)
+            ax.axvline(self.point_estimates.params[self.model][i][0], color="r")
+            ax.axvline(self.point_estimates.params[self.model][i][0] - self.point_estimates.params[self.model][i][1],
+                       color="k", linestyle='--')
+            ax.axvline(self.point_estimates.params[self.model][i][0] + self.point_estimates.params[self.model][i][2],
+                       color="k", linestyle='--')
 
         for yi in range(var.ndim):      # Loop over the histograms
             for xi in range(yi):
                 ax = axes[yi, xi]
-                ax.axvline(self.point_estimates.params[xi][0], color="r")
-                ax.axhline(self.point_estimates.params[yi][0], color="r")
-                ax.plot(self.point_estimates.params[xi][0], self.point_estimates.params[yi][0], "sr")
+                ax.axvline(self.point_estimates.params[self.model][xi][0], color="r")
+                ax.axhline(self.point_estimates.params[self.model][yi][0], color="r")
+                ax.plot(self.point_estimates.params[self.model][xi][0], self.point_estimates.params[self.model][yi][0],
+                        "sr")
 
         plt.tight_layout()
         plt.savefig(var.plots_output_direc + str(self.pim) + '/' + self.model + '_corner.png', bbox_inches='tight')
-
+        plt.close()

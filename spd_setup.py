@@ -14,7 +14,7 @@ class spd_setup:
         self.nums_file = 'nums_todo.npz'   # ndarray of monotonically increasing values
 
         # input options
-        self.alpha = False
+        self.alpha = True
 
         # output options
         self.plot = True
@@ -28,7 +28,7 @@ class spd_setup:
             self.ndim = 3
         self.nwalkers = 10
         self.niter = 30
-        self.burnin = 10
+        self.burnin = 30
         self.a = 5
 
         # pPXF params
