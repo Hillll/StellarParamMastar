@@ -7,6 +7,7 @@ os.environ["OMP_NUM_THREADS"] = "1"
 
 from pystellibs_SPD import Marcs_p0, Bosz
 import numpy as np
+import scipy
 import pandas as pd
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
@@ -22,7 +23,6 @@ from ppxf.ppxf import ppxf
 import emcee
 import multiprocessing
 from multiprocessing import Pool
-
 from corner import corner
 
 var = spd_setup()
@@ -413,6 +413,10 @@ class mcmc:
         self.yerr = yerr
         self.meta_data = meta_data
         self.parallel = parallel
+        self.gaia_priors = {'minTEFF_gaia':meta_data['minTEFF_gaia'], 'maxTEFF_gaia':meta_data['maxTEFF_gaia'],
+                            'minLOGG_gaia':meta_data['minLOGG_gaia'], 'maxLOGG_gaia':meta_data['maxLOGG_gaia']}
+        # self.minTEFF_gaia, self.maxTEFF_gaia = meta_data['minTEFF_gaia'], meta_data['maxTEFF_gaia']
+        # self.minLOGG_gaia, self.maxLOGG_gaia = meta_data['minLOGG_gaia'], meta_data['maxLOGG_gaia']
         print('\nUsing {} CPUs'.format(multiprocessing.cpu_count()))
 
     def starting(self):
@@ -435,12 +439,14 @@ class mcmc:
         self.sample_all[model] = sampler
         self.sample_all
 
+
     def main(self, model):  # The MCMC routine
         if self.parallel == True:
             with Pool() as pool:
                 print(np.show_config())
+                print(scipy.show_config())
                 sampler = emcee.EnsembleSampler(var.nwalkers, var.ndim, self.lnprob, a=var.a, pool=pool,
-                                                args=[model, self.flux, self.yerr, self.meta_data])
+                                                args=[model, self.flux, self.yerr, self.gaia_priors])
                 # Burn in
                 p0_, _, _ = sampler.run_mcmc(self.p0_, var.burnin,
                                              progress=True)  # this diminishes the influence of starting values
@@ -462,9 +468,9 @@ class mcmc:
             return sampler
 
     @staticmethod
-    def lnprob(theta, model, flux, yerr, meta_data):  # posterior probability bosz
+    def lnprob(theta, model, flux, yerr, gaia_priors):  # posterior probability bosz
         t0 = time.time()
-        lp = mcmc.lnprior(theta, model, meta_data)
+        lp = mcmc.lnprior(theta, model, gaia_priors)
         if not np.isfinite(lp):
             return -np.inf
         temp = lp + mcmc.lnlike(theta, model, flux, yerr)
@@ -472,24 +478,24 @@ class mcmc:
         return temp
 
     @staticmethod
-    def lnprior(theta, model, meta_data):  # prior estimate of the data - flat
+    def lnprior(theta, model, gaia_priors):  # prior estimate of the data - flat
         if var.alpha:
             t, g, z, a = theta
             if model == 'marcs' or model == 'MARCS':
-                if meta_data['minTEFF_gaia'] <= t <= meta_data['maxTEFF_gaia'] and \
-                        meta_data['minLOGG_gaia'] <= g <= meta_data['maxLOGG_gaia'] and \
+                if gaia_priors['minTEFF_gaia'] <= t <= gaia_priors['maxTEFF_gaia'] and \
+                        gaia_priors['minLOGG_gaia'] <= g <= gaia_priors['maxLOGG_gaia'] and \
                         t > 2500 and -2 <= z <= 1 and -0.4 <= a <= 0.4:
                     return 1
-                elif meta_data['minTEFF_gaia'] <= t <= meta_data['maxTEFF_gaia'] and \
-                        meta_data['minLOGG_gaia'] <= g <= meta_data['maxLOGG_gaia'] and \
+                elif gaia_priors['minTEFF_gaia'] <= t <= gaia_priors['maxTEFF_gaia'] and \
+                        gaia_priors['minLOGG_gaia'] <= g <= gaia_priors['maxLOGG_gaia'] and \
                         t > 2500 and -2.5 <= z <= 1 and 0 <= a <= 0.4:
                     return 1
                 else:
                     return -np.inf
 
             elif model == 'bosz' or model == 'BOSZ':
-                if meta_data['minTEFF_gaia'] <= t <= meta_data['maxTEFF_gaia'] and \
-                        meta_data['minLOGG_gaia'] <= g <= meta_data['maxLOGG_gaia'] and \
+                if gaia_priors['minTEFF_gaia'] <= t <= gaia_priors['maxTEFF_gaia'] and \
+                        gaia_priors['minLOGG_gaia'] <= g <= gaia_priors['maxLOGG_gaia'] and \
                         t > 3500 and -2.5 <= z <= 0.5 and -0.25 <= a <= 0.5:
                     return 1
                 else:
@@ -497,16 +503,16 @@ class mcmc:
         else:
             t, g, z = theta
             if model == 'marcs' or model == 'MARCS':
-                if meta_data['minTEFF_gaia'] <= t <= meta_data['maxTEFF_gaia'] and \
-                        meta_data['minLOGG_gaia'] <= g <= meta_data['maxLOGG_gaia'] and \
+                if gaia_priors['minTEFF_gaia'] <= t <= gaia_priors['maxTEFF_gaia'] and \
+                        gaia_priors['minLOGG_gaia'] <= g <= gaia_priors['maxLOGG_gaia'] and \
                         t > 2000 and -3 <= z <= 1:
                     return 1
                 else:
                     return -np.inf
 
             elif model == 'bosz' or model == 'BOSZ':
-                if meta_data['minTEFF_gaia'] <= t <= meta_data['maxTEFF_gaia'] and \
-                        meta_data['minLOGG_gaia'] <= g <= meta_data['maxLOGG_gaia'] and \
+                if gaia_priors['minTEFF_gaia'] <= t <= gaia_priors['maxTEFF_gaia'] and \
+                        gaia_priors['minLOGG_gaia'] <= g <= gaia_priors['maxLOGG_gaia'] and \
                         t > 3500 and -3 <= z <= 0.5:
                     return 1
                 else:
