@@ -79,7 +79,7 @@ def model_spec(theta, model):  # model given a set of parameters (theta)
 
 
 class load_data:
-    """Load mastar spectra and the estimates file from Gaia photometry."""
+    """Load spectra and the estimates file from Gaia photometry."""
 
     def __init__(self, data_direc=var.data_direc, spec_file=var.spec_file, est_file=var.est_file,
                  nums_file=var.nums_file):
@@ -127,6 +127,11 @@ class load_data:
     def get_targets(self, number):
         file = np.load(self.data_direc + self.nums_file)
         return file['arr_0'][number]
+
+    def get_solar(self):
+        self.wave = np.load(var.data_direc + 'SOLAR_spec_mastar-res.npz')['arr_0']
+        self.flux = np.load(var.data_direc + 'SOLAR_spec_mastar-res.npz')['arr_1']
+        self.yerr = np.load(var.data_direc + 'SOLAR_spec_mastar-res.npz')['arr_2']
 
 
 class prepare_spectrum:

@@ -5,7 +5,7 @@ class spd_setup:
     """
     def __init__(self):
         # directories
-        self.data_direc = '/home/lewishill/Downloads/'
+        self.data_direc = '/home/lewishill/PycharmProjects/SPD/input/'
         self.output_direc = '/home/lewishill/PycharmProjects/SPD/output/'
         self.plots_output_direc = '/home/lewishill/PycharmProjects/SPD/plots/'
 
@@ -14,7 +14,7 @@ class spd_setup:
         self.nums_file = 'nums_todo.npz'   # ndarray of monotonically increasing values
 
         # input options
-        self.alpha = False
+        self.alpha = True
 
         # output options
         self.plot = True
@@ -27,8 +27,8 @@ class spd_setup:
         else:
             self.ndim = 3
         self.nwalkers = 40
-        self.niter = 200
-        self.burnin = 200
+        self.niter = 100
+        self.burnin = 100
         self.a = 5
 
         # pPXF params
