@@ -27,7 +27,7 @@ ebv_gaia = mast_data.meta_data['ebv']
 
 print('\nT1: ', time.time()-t0)
 
-for c, i in enumerate(targets):
+for c, i in enumerate(targets[:1]):
     print('Running spectrum: {}'.format(i), end='\r')
 
     # interpolate (if necessary), de-redden and median normalise spectrum
@@ -45,7 +45,7 @@ for c, i in enumerate(targets):
                     parallel=True)
     mcmc_run.starting()     # starting values for walkers
     mcmc_run.sample(model='BOSZ')     # use emcee to sample param space
-
+'''
     # get point estimates from chains
     point = point_estimates(clean_spec, mast_data.pim[c])
     point.flatchain(mcmc_run, model='BOSZ')
@@ -54,7 +54,7 @@ for c, i in enumerate(targets):
     point.get_chi2(model='BOSZ')
 
     point.save_data(model='BOSZ')
-    plot_bosz = plotting(point, clean_spec, mast_data, c, model='BOSZ')
+    plot_bosz = plotting(point, clean_spec, mast_data.pim[c], c, model='BOSZ')
 
     if mast_data.meta_data[c]['minTEFF_gaia'] > 5000:       # only use marcs for low Teff
         continue
@@ -69,6 +69,7 @@ for c, i in enumerate(targets):
     point.get_chi2(model='MARCS')
 
     point.save_data(model='MARCS')
-    plot_marcs = plotting(point, clean_spec, mast_data, c, model='MARCS')
+    plot_marcs = plotting(point, clean_spec, mast_data.pim[c], c, model='MARCS')
 
 print('\nTotal time taken: ', time.time() - t0)
+'''

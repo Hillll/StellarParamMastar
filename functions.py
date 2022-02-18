@@ -129,9 +129,9 @@ class load_data:
         return file['arr_0'][number]
 
     def get_solar(self):
-        self.wave = np.load(var.data_direc + 'SOLAR_spec_mastar-res.npz')['arr_0']
-        self.flux = np.load(var.data_direc + 'SOLAR_spec_mastar-res.npz')['arr_1']
-        self.yerr = np.load(var.data_direc + 'SOLAR_spec_mastar-res.npz')['arr_2']
+        self.wave = np.load(var.data_direc + 'SOLAR_spec_mastar-res-nodegrade.npz')['arr_0']
+        self.flux = np.load(var.data_direc + 'SOLAR_spec_mastar-res-nodegrade.npz')['arr_1']
+        self.yerr = np.load(var.data_direc + 'SOLAR_spec_mastar-res-nodegrade.npz')['arr_2']
 
 
 class prepare_spectrum:
@@ -345,81 +345,33 @@ class prepare_spectrum:
         else:
             return False
 
-class toy_func:
-    """The functions required for running emcee."""
+class prepare_spectrum_solar:
+    """deal with dead pixels in data, correct for reddening and deal with no gaia info"""
 
-    # marcs_mods = synth_models('marcs')
-    # bosz_mods = synth_models('bosz')
-
-    def __init__(self, model, flux, yerr, meta_data, parallel):
-        self.model = model
+    def __init__(self, wave, flux, yerr):
+        self.wave = wave
         self.flux = flux
         self.yerr = yerr
-        self.meta_data = meta_data
-        # self.marcs_mods = marcs_mods
-        # self.bosz_mods = bosz_mods
-        self.parallel = parallel
+
+    def get_med_data(self):
+        """ Median normalise the data, we also need to calculate the error as a percentage of the flux.
+                If dead pixels occur in the spectrum/error array, these need to be interpolated first."""
+
+        sd_pcnt = self.yerr  # error as a percentage of the flux
+        self.corrected_flux_med = self.flux / np.median(self.flux)  # median normalise
+        self.yerr = self.corrected_flux_med * sd_pcnt
 
 
-    def starting(self):
-        p0_ = []  # generate random starting points for the walkers, uniform across min and max priors
-        for j in range(var.nwalkers):
-            temp = [random.uniform(self.meta_data['minTEFF_gaia'], self.meta_data['maxTEFF_gaia']),
-                    random.uniform(self.meta_data['minLOGG_gaia'], self.meta_data['maxLOGG_gaia']),
-                    random.uniform(-2.5, 0.5)]
-            p0_.append(temp)
-        self.p0_ = np.asarray(p0_)
-
-    def sample(self):
-        print('\nRunning MCMC')
-        self.sampler = self.main()
-        return self.sampler.flatchain
-
-    # @staticmethod
-    def main(self):  # The MCMC routine
-        if self.parallel == True:
-            np.random.seed(42)
-            initial = np.random.randn(32, 5)
-            nwalkers, ndim = initial.shape
-            nsteps = 100
-            with Pool() as pool:
-                    sampler = emcee.EnsembleSampler(nwalkers, ndim, self.lnprob, args=[self.flux, self.yerr],
-                                                    pool=pool)
-                    start = time.time()
-                    sampler.run_mcmc(initial, nsteps, progress=True)
-                    end = time.time()
-                    multi_time = end - start
-                    print("Multiprocessing took {0:.1f} seconds".format(multi_time))
-                    return sampler
-
-    @staticmethod
-    def lnprob(theta, flux, yerr):  # posterior probability bosz
-        t0 = time.time()
-        t = time.time() + 5
-        #print(toy_func.lnprior2(theta))
-        print(len(flux), len(yerr))
-        while True:
-            if time.time() >= t:
-                break
-        print('Time on cpu {}: {}'.format(multiprocessing.current_process().name, time.time()))
-        return -0.5 * np.sum(theta ** 2)
-
-    @staticmethod
-    def lnprior2(theta):
-        spec = model_spec([5000, 3, 0], 'BOSZ')
-        return len(spec)
-
-class mcmc:
+class mcmc_solar:
     """The functions required for running emcee."""
 
-    def __init__(self, flux, yerr, meta_data, parallel=True):
+    def __init__(self, flux, yerr, parallel=True):
         self.sample_all = {}
         self.flux = flux
         self.yerr = yerr
-        self.meta_data = meta_data
         self.parallel = parallel
-        self.gaia_priors = {'minTEFF_gaia':meta_data['minTEFF_gaia'], 'maxTEFF_gaia':meta_data['maxTEFF_gaia'],
-                            'minLOGG_gaia':meta_data['minLOGG_gaia'], 'maxLOGG_gaia':meta_data['maxLOGG_gaia']}
+        self.gaia_priors = {'minTEFF_gaia':3000, 'maxTEFF_gaia':7000,
+                            'minLOGG_gaia':2, 'maxLOGG_gaia':5}
         # self.minTEFF_gaia, self.maxTEFF_gaia = meta_data['minTEFF_gaia'], meta_data['maxTEFF_gaia']
         # self.minLOGG_gaia, self.maxLOGG_gaia = meta_data['minLOGG_gaia'], meta_data['maxLOGG_gaia']
         print('\nUsing {} CPUs'.format(multiprocessing.cpu_count()))
@@ -428,12 +380,12 @@ class mcmc:
         p0_ = []  # generate random starting points for the walkers, uniform across min and max priors
         for j in range(var.nwalkers):
             if var.alpha:
-                temp = [random.uniform(self.meta_data['minTEFF_gaia'], self.meta_data['maxTEFF_gaia']),
-                        random.uniform(self.meta_data['minLOGG_gaia'], self.meta_data['maxLOGG_gaia']),
+                temp = [random.uniform(self.gaia_priors['minTEFF_gaia'], self.gaia_priors['maxTEFF_gaia']),
+                        random.uniform(self.gaia_priors['minLOGG_gaia'], self.gaia_priors['maxLOGG_gaia']),
                         random.uniform(-2.5, 0.5), random.uniform(-0.25, 0.4)]  # within marcs and bosz alpha range
             else:
-                temp = [random.uniform(self.meta_data['minTEFF_gaia'], self.meta_data['maxTEFF_gaia']),
-                        random.uniform(self.meta_data['minLOGG_gaia'], self.meta_data['maxLOGG_gaia']),
+                temp = [random.uniform(self.gaia_priors['minTEFF_gaia'], self.gaia_priors['maxTEFF_gaia']),
+                        random.uniform(self.gaia_priors['minLOGG_gaia'], self.gaia_priors['maxLOGG_gaia']),
                         random.uniform(-2.5, 0.5)]
             p0_.append(temp)
         self.p0_ = np.asarray(p0_)
@@ -545,6 +497,184 @@ class mcmc:
             LnLike = -0.5 * np.sum(np.log(2 * pi * (yerr ** 2)) + t[mask]) / len(yerr)
             return LnLike
 
+class mcmc:
+    """The functions required for running emcee."""
+
+    def __init__(self, flux, yerr, meta_data, parallel=True):
+        self.sample_all = {}
+        self.flux = flux
+        self.yerr = yerr
+        self.meta_data = meta_data
+        self.parallel = parallel
+        self.gaia_priors = {'minTEFF_gaia':meta_data['minTEFF_gaia'], 'maxTEFF_gaia':meta_data['maxTEFF_gaia'],
+                            'minLOGG_gaia':meta_data['minLOGG_gaia'], 'maxLOGG_gaia':meta_data['maxLOGG_gaia']}
+        # self.minTEFF_gaia, self.maxTEFF_gaia = meta_data['minTEFF_gaia'], meta_data['maxTEFF_gaia']
+        # self.minLOGG_gaia, self.maxLOGG_gaia = meta_data['minLOGG_gaia'], meta_data['maxLOGG_gaia']
+        print('\nUsing {} CPUs'.format(multiprocessing.cpu_count()))
+
+    def starting(self):
+        p0_ = []  # generate random starting points for the walkers, uniform across min and max priors
+        for j in range(var.nwalkers):
+            if var.alpha:
+                temp = [random.uniform(self.meta_data['minTEFF_gaia'], self.meta_data['maxTEFF_gaia']),
+                        random.uniform(self.meta_data['minLOGG_gaia'], self.meta_data['maxLOGG_gaia']),
+                        random.uniform(-2.5, 0.5), random.uniform(-0.25, 0.4)]  # within marcs and bosz alpha range
+            else:
+                temp = [random.uniform(self.meta_data['minTEFF_gaia'], self.meta_data['maxTEFF_gaia']),
+                        random.uniform(self.meta_data['minLOGG_gaia'], self.meta_data['maxLOGG_gaia']),
+                        random.uniform(-2.5, 0.5)]
+            p0_.append(temp)
+        self.p0_ = np.asarray(p0_)
+
+    def sample(self, model):
+        print('\nRunning MCMC using {} models...'.format(model))
+        sampler = self.main(model)
+        self.sample_all[model] = sampler
+        self.sample_all
+
+
+    def main(self, model):  # The MCMC routine
+        if self.parallel == True:
+            with Pool() as pool:
+                backend = emcee.backends.HDFBackend(var.output_direc + 'chains.h5')     # backend to save chains
+                backend.reset(var.nwalkers, var.ndim)
+
+                sampler = emcee.EnsembleSampler(var.nwalkers, var.ndim, self.lnprob, a=var.a, pool=pool,
+                                                args=[model, self.flux, self.yerr, self.gaia_priors], backend=backend)
+
+                # Burn in
+                p0_, _, _ = sampler.run_mcmc(self.p0_, var.burnin,
+                                             progress=True)  # this diminishes the influence of starting values
+                print('\nFinished burn in.')
+
+                self.autocorr = []
+
+                tau_old = np.inf
+                params_old = np.zeros(4)
+
+                for sample in sampler.sample(p0_, iterations=var.niter, progress=True):
+                    # check convergence every N steps
+                    if sampler.iteration % 50 == 0:
+                        # Compute the autocorrelation time at this iteration
+                        tau = sampler.get_autocorr_time(tol=0)
+                        self.autocorr.append(np.mean(tau))
+                        print('\nIteration: {}'.format(sampler.iteration))
+                        print('Mean tau: {}'.format(np.mean(tau)))
+                        # check params
+                        steady, params_old = self.compare_params(params_old, sampler)
+                        print('Params: {}'.format(params_old))
+                        # Check convergence
+                        converged = np.all(tau * 20 < sampler.iteration) # and steady == 1
+                        if converged:
+                            break
+                        tau_old = tau
+                # Production
+                # sampler.run_mcmc(p0_, var.niter, progress=True)
+                print('\nFinished {} iterations'.format(var.niter))
+                return sampler
+        elif self.parallel == False:
+            sampler = emcee.EnsembleSampler(var.nwalkers, var.ndim, self.lnprob, a=var.a)
+            # Burn in
+            print(self.p0_, var.burnin)
+            p0_, _, _ = sampler.run_mcmc(self.p0_, var.burnin,
+                                         progress=True)  # this diminishes the influence of starting values
+            print('\nFinished burn in.')
+            # Production
+            sampler.run_mcmc(p0_, var.niter, progress=True)
+            print('\nFinished {} iterations'.format(var.niter))
+            return sampler
+
+    @staticmethod
+    def lnprob(theta, model, flux, yerr, gaia_priors):  # posterior probability bosz
+        t0 = time.time()
+        lp = mcmc.lnprior(theta, model, gaia_priors)
+        if not np.isfinite(lp):
+            return -np.inf
+        temp = lp + mcmc.lnlike(theta, model, flux, yerr)
+        # print('Time on cpu {}: {}'.format(multiprocessing.current_process().name, time.time() - t0))
+        return temp
+
+    @staticmethod
+    def lnprior(theta, model, gaia_priors):  # prior estimate of the data - flat
+        if var.alpha:
+            t, g, z, a = theta
+            if model == 'marcs' or model == 'MARCS':
+                if gaia_priors['minTEFF_gaia'] <= t <= gaia_priors['maxTEFF_gaia'] and \
+                        gaia_priors['minLOGG_gaia'] <= g <= gaia_priors['maxLOGG_gaia'] and \
+                        t > 2500 and -2 <= z <= 1 and -0.4 <= a <= 0.4:
+                    return 1
+                elif gaia_priors['minTEFF_gaia'] <= t <= gaia_priors['maxTEFF_gaia'] and \
+                        gaia_priors['minLOGG_gaia'] <= g <= gaia_priors['maxLOGG_gaia'] and \
+                        t > 2500 and -2.5 <= z <= 1 and 0 <= a <= 0.4:
+                    return 1
+                else:
+                    return -np.inf
+
+            elif model == 'bosz' or model == 'BOSZ':
+                if gaia_priors['minTEFF_gaia'] <= t <= gaia_priors['maxTEFF_gaia'] and \
+                        gaia_priors['minLOGG_gaia'] <= g <= gaia_priors['maxLOGG_gaia'] and \
+                        t > 3500 and -2.5 <= z <= 0.5 and -0.25 <= a <= 0.5:
+                    return 1
+                else:
+                    return -np.inf
+        else:
+            t, g, z = theta
+            if model == 'marcs' or model == 'MARCS':
+                if gaia_priors['minTEFF_gaia'] <= t <= gaia_priors['maxTEFF_gaia'] and \
+                        gaia_priors['minLOGG_gaia'] <= g <= gaia_priors['maxLOGG_gaia'] and \
+                        t > 2000 and -3 <= z <= 1:
+                    return 1
+                else:
+                    return -np.inf
+
+            elif model == 'bosz' or model == 'BOSZ':
+                if gaia_priors['minTEFF_gaia'] <= t <= gaia_priors['maxTEFF_gaia'] and \
+                        gaia_priors['minLOGG_gaia'] <= g <= gaia_priors['maxLOGG_gaia'] and \
+                        t > 3500 and -3 <= z <= 0.5:
+                    return 1
+                else:
+                    return -np.inf
+
+    @staticmethod
+    def lnlike(theta, model, flux, yerr):  # likelihood fn that evaluates best fit
+        if model == 'bosz' or model == 'BOSZ':
+            model_flux = np.asarray(model_spec(theta, model))  # model flux with mcmc proposed params (theta)
+        elif model == 'marcs' or model == 'MARCS':
+            model_flux = np.asarray(model_spec(theta, model))  # model flux with mcmc proposed parameters (theta)
+
+        if np.array_equal(model_flux,
+                          np.ones(len(model_flux))):  # if theta is outside model grid bbox, array of ones is returned
+            return -np.inf  # return -inf so walkers move away form this parameter combination
+        elif np.isnan(model_flux).any():
+            return -np.inf  # return -inf so walkers move away form this parameter combination
+        else:
+            sol = (ppxf(model_flux, flux, noise=yerr, velscale=var.velscale, start=var.start, degree=-1,
+                        mdegree=var.mdegree, moments=var.moments,
+                        quiet=True))  # run ppxf with interpolated model
+
+            t = ((flux - sol.bestfit) ** 2) / (yerr ** 2)
+            mask = ~np.isinf(t) & ~np.isnan(t)  # remove inf values from array
+            LnLike = -0.5 * np.sum(np.log(2 * pi * (yerr ** 2)) + t[mask]) / len(yerr)
+            return LnLike
+
+    @staticmethod
+    def compare_params(params_old, sampler_new):
+        """Compare the parameters between iterations. Returns 0 of & change between any parameters is > 1 %, returns
+        1 otherwise."""
+        samples_new_clean = sampler_new.chain[:, var.burnin, :].reshape((-1, var.ndim)).T
+        params_new = np.array([np.median(samples_new_clean[i]) for i in range(var.ndim)])
+        pcnt_change = np.array([mcmc.get_pcnt_change(i, j) for i, j in zip(params_old, params_new)])
+        if np.any(pcnt_change > 1):
+            return 0, params_new
+        else:
+            return 1, params_new
+
+    @staticmethod
+    def get_pcnt_change(a, b):
+        """Calculate absolute percentage change between two values"""
+        return (abs(b - a)/a)*100
+
+
 class point_estimates:
     """Use the sampler output to calculate point estimate parameters and their errors."""
 
@@ -645,9 +775,9 @@ class point_estimates:
 
 class plotting:
     """If var.plot == True, then plot bestfit, corner and trace."""
-    def __init__(self, point_estimates, clean_spec, mast_data, c, model):
+    def __init__(self, point_estimates, clean_spec, pim, c, model):
         self.model = model
-        self.pim = mast_data.pim[c]
+        self.pim = pim
         self.clean_spec = clean_spec
         self.point_estimates = point_estimates
         if var.plot:

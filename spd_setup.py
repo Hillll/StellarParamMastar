@@ -11,7 +11,7 @@ class spd_setup:
 
         self.spec_file = 'mastar-goodspec-v3_1_1-v1_7_7.fits'
         self.est_file = 'mastar-goodspec-mpl11-gaia-DT-v2-mpl11-v3_1_1-v1_7_5.fits'
-        self.nums_file = 'nums_todo.npz'   # ndarray of monotonically increasing values
+        self.nums_file = 'nums_todo-temp.npz'   # ndarray of monotonically increasing values
 
         # input options
         self.alpha = True
@@ -26,9 +26,9 @@ class spd_setup:
             self.ndim = 4
         else:
             self.ndim = 3
-        self.nwalkers = 40
-        self.niter = 100
+        self.nwalkers = 20
         self.burnin = 100
+        self.niter = 3000
         self.a = 5
 
         # pPXF params
