@@ -28,7 +28,7 @@ class spd_setup:
             self.ndim = 3
         self.nwalkers = 20
         self.burnin = 100
-        self.niter = 3000
+        self.niter = 500
         self.a = 5
 
         # pPXF params

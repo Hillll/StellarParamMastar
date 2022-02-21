@@ -501,6 +501,7 @@ class mcmc:
     """The functions required for running emcee."""
 
     def __init__(self, flux, yerr, meta_data, parallel=True):
+        self.autocorr = []
         self.sample_all = {}
         self.flux = flux
         self.yerr = yerr
@@ -542,36 +543,26 @@ class mcmc:
                 sampler = emcee.EnsembleSampler(var.nwalkers, var.ndim, self.lnprob, a=var.a, pool=pool,
                                                 args=[model, self.flux, self.yerr, self.gaia_priors], backend=backend)
 
-                # Burn in
-                p0_, _, _ = sampler.run_mcmc(self.p0_, var.burnin,
-                                             progress=True)  # this diminishes the influence of starting values
+                # Burn in diminishes the influence of starting values
+                p0_, _, _ = sampler.run_mcmc(self.p0_, var.burnin, progress=True)
                 print('\nFinished burn in.')
 
-                self.autocorr = []
-
-                tau_old = np.inf
                 params_old = np.zeros(4)
-
                 for sample in sampler.sample(p0_, iterations=var.niter, progress=True):
                     # check convergence every N steps
                     if sampler.iteration % 50 == 0:
                         # Compute the autocorrelation time at this iteration
                         tau = sampler.get_autocorr_time(tol=0)
                         self.autocorr.append(np.mean(tau))
-                        print('\nIteration: {}'.format(sampler.iteration))
-                        print('Mean tau: {}'.format(np.mean(tau)))
                         # check params
                         steady, params_old = self.compare_params(params_old, sampler)
-                        print('Params: {}'.format(params_old))
                         # Check convergence
-                        converged = np.all(tau * 20 < sampler.iteration) # and steady == 1
+                        converged = np.all(tau * 15 < sampler.iteration) and steady == 1
                         if converged:
                             break
-                        tau_old = tau
-                # Production
-                # sampler.run_mcmc(p0_, var.niter, progress=True)
-                print('\nFinished {} iterations'.format(var.niter))
+                print('\nFinished in {} iterations.'.format(sampler.iteration))
                 return sampler
+
         elif self.parallel == False:
             sampler = emcee.EnsembleSampler(var.nwalkers, var.ndim, self.lnprob, a=var.a)
             # Burn in
@@ -583,6 +574,24 @@ class mcmc:
             sampler.run_mcmc(p0_, var.niter, progress=True)
             print('\nFinished {} iterations'.format(var.niter))
             return sampler
+
+    @staticmethod
+    def compare_params(params_old, sampler_new):
+        """Compare the parameters between iterations. Returns 0 of & change between any parameters is > 1 %, returns
+        1 otherwise."""
+        samples_new_clean = sampler_new.chain.T[:, var.burnin:, :].reshape((var.ndim, -1))
+        params_new = np.array([np.median(samples_new_clean[i]) for i in range(var.ndim)])
+        pcnt_change = np.array([mcmc.get_pcnt_change(i, j) for i, j in zip(params_old, params_new)])
+        print(pcnt_change)
+        if np.any(pcnt_change > 1):
+            return 0, params_new
+        else:
+            return 1, params_new
+
+    @staticmethod
+    def get_pcnt_change(a, b):
+        """Calculate absolute percentage change between two values"""
+        return abs((b - a)/a)*100
 
     @staticmethod
     def lnprob(theta, model, flux, yerr, gaia_priors):  # posterior probability bosz
@@ -656,23 +665,6 @@ class mcmc:
             mask = ~np.isinf(t) & ~np.isnan(t)  # remove inf values from array
             LnLike = -0.5 * np.sum(np.log(2 * pi * (yerr ** 2)) + t[mask]) / len(yerr)
             return LnLike
-
-    @staticmethod
-    def compare_params(params_old, sampler_new):
-        """Compare the parameters between iterations. Returns 0 of & change between any parameters is > 1 %, returns
-        1 otherwise."""
-        samples_new_clean = sampler_new.chain[:, var.burnin, :].reshape((-1, var.ndim)).T
-        params_new = np.array([np.median(samples_new_clean[i]) for i in range(var.ndim)])
-        pcnt_change = np.array([mcmc.get_pcnt_change(i, j) for i, j in zip(params_old, params_new)])
-        if np.any(pcnt_change > 1):
-            return 0, params_new
-        else:
-            return 1, params_new
-
-    @staticmethod
-    def get_pcnt_change(a, b):
-        """Calculate absolute percentage change between two values"""
-        return (abs(b - a)/a)*100
 
 
 class point_estimates:
