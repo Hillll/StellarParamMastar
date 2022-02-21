@@ -55,7 +55,7 @@ for c, i in enumerate(targets[:1]):
 
     point.save_data(model='BOSZ')
     plot_bosz = plotting(point, clean_spec, mast_data.pim[c], c, model='BOSZ')
-'''
+
     if mast_data.meta_data[c]['minTEFF_gaia'] > 5000:       # only use marcs for low Teff
         continue
 
@@ -70,5 +70,5 @@ for c, i in enumerate(targets[:1]):
 
     point.save_data(model='MARCS')
     plot_marcs = plotting(point, clean_spec, mast_data.pim[c], c, model='MARCS')
-'''
+
 print('\nTotal time taken: ', time.time() - t0)

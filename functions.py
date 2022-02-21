@@ -582,7 +582,6 @@ class mcmc:
         samples_new_clean = sampler_new.chain.T[:, var.burnin:, :].reshape((var.ndim, -1))
         params_new = np.array([np.median(samples_new_clean[i]) for i in range(var.ndim)])
         pcnt_change = np.array([mcmc.get_pcnt_change(i, j) for i, j in zip(params_old, params_new)])
-        print(pcnt_change)
         if np.any(pcnt_change > 1):
             return 0, params_new
         else:
