@@ -24,6 +24,7 @@ import emcee
 import multiprocessing
 from multiprocessing import Pool
 from corner import corner
+import pickle
 
 var = spd_setup()
 if var.alpha:
@@ -501,8 +502,8 @@ class mcmc:
     """The functions required for running emcee."""
 
     def __init__(self, flux, yerr, meta_data, parallel=True):
-        self.autocorr = []
         self.sample_all = {}
+        self.converged = {}
         self.flux = flux
         self.yerr = yerr
         self.meta_data = meta_data
@@ -537,31 +538,40 @@ class mcmc:
     def main(self, model):  # The MCMC routine
         if self.parallel == True:
             with Pool() as pool:
-                backend = emcee.backends.HDFBackend(var.output_direc + 'chains.h5')     # backend to save chains
-                backend.reset(var.nwalkers, var.ndim)
+                t0 = time.time()
 
                 sampler = emcee.EnsembleSampler(var.nwalkers, var.ndim, self.lnprob, a=var.a, pool=pool,
-                                                args=[model, self.flux, self.yerr, self.gaia_priors], backend=backend)
+                                                args=[model, self.flux, self.yerr, self.gaia_priors])
 
                 # Burn in diminishes the influence of starting values
                 p0_, _, _ = sampler.run_mcmc(self.p0_, var.burnin, progress=True)
                 print('\nFinished burn in.')
 
-                params_old = np.zeros(4)
-                for sample in sampler.sample(p0_, iterations=var.niter, progress=True):
-                    # check convergence every N steps
-                    if sampler.iteration % 50 == 0:
-                        # Compute the autocorrelation time at this iteration
-                        tau = sampler.get_autocorr_time(tol=0)
-                        self.autocorr.append(np.mean(tau))
-                        # check params
-                        steady, params_old = self.compare_params(params_old, sampler)
-                        # Check convergence
-                        converged = np.all(tau * 15 < sampler.iteration) and steady == 1
-                        if converged:
-                            break
-                print('\nFinished in {} iterations.'.format(sampler.iteration))
-                return sampler
+                if not var.early_stopping:
+                    sampler.run_mcmc(p0_, var.niter, progress=True)
+                    return sampler
+                else:
+                    params_old = np.zeros(4)
+                    for sample in sampler.sample(p0_, iterations=var.niter, progress=True):
+                        # check convergence every N steps
+                        if sampler.iteration % 50 == 0:
+                            # Compute the autocorrelation time at this iteration
+                            tau = sampler.get_autocorr_time(tol=0)
+                            # check params
+                            steady, params_old = self.compare_params(params_old, sampler)
+                            # Check convergence
+                            converged = np.all(tau * 15 < sampler.iteration) and steady == 1
+                            if converged:
+                                print('\nConverged in {} iterations.'.format(sampler.iteration))
+                                print('Time taken: {} minutes.'.format((time.time() - t0) / 60))
+                                self.converged[model] = 1
+                                return sampler
+                                break
+                            elif sampler.iteration == var.niter+var.burnin:
+                                print('\nNot converged.')
+                                print('Time taken: {} minutes.'.format((time.time() - t0) / 60))
+                                self.converged[model] = 0
+                                return sampler
 
         elif self.parallel == False:
             sampler = emcee.EnsembleSampler(var.nwalkers, var.ndim, self.lnprob, a=var.a)
@@ -669,22 +679,26 @@ class mcmc:
 class point_estimates:
     """Use the sampler output to calculate point estimate parameters and their errors."""
 
-    def __init__(self, spec_info, pim):
+    def __init__(self, spec_info, pim, model):
         self.params = {}
         self.chi = {}
         self.ppxf_fit = {}
         self.pim = pim
+        self.model = model
         self.alpha = var.alpha
 
         # data from 'clean_spec' instance.
         self.mast_flux = spec_info.corrected_flux_med
         self.yerr = spec_info.yerr
 
-    def flatchain(self, mcmc_run, model):
+    def flatchain(self, mcmc_run):
         """remove burnin and flatten chain to 1D"""
-        samples_flat = mcmc_run.sample_all[model].chain
+        if var.early_stopping:
+            self.params[self.model + '_converged'] = mcmc_run.converged[self.model]
+        samples_flat = mcmc_run.sample_all[self.model].chain
         self.samples_cut = samples_flat[:, var.burnin:, :]
         self.samples_clean = self.samples_cut.reshape((-1, var.ndim))
+        self.params[self.model + '_samples'] = self.samples_cut
         return self.samples_clean
 
     @staticmethod
@@ -705,7 +719,7 @@ class point_estimates:
         mode_err_up = (arviz.hdi(chain, 0.68)[1] - mode)
         return [mode, mode_err_dn, mode_err_up]
 
-    def params_err(self, model, teff='median', logg='mode', zh='mode', alpha='mode'):
+    def params_err(self, teff='median', logg='mode', zh='mode', alpha='mode'):
         """calculate the median or mode of the distribution, depending on what is required.
         Also returns errors"""
         params_temp = []
@@ -730,38 +744,43 @@ class point_estimates:
             elif c == 3 and alpha == 'mode':
                 params_temp.append(self.get_mode(i))
         params_temp = np.asarray(params_temp)
-        self.params[model] = params_temp
+        self.params[self.model + '_params'] = params_temp
 
-    def get_model_fit(self, model):
+    def get_model_fit(self):
         """Get polynomial corrected model fit from pPXF."""
         if self.alpha:
-            model_flux = model_spec([self.params[model][0][0], self.params[model][1][0], self.params[model][2][0],
-                                    self.params[model][3][0]], model)
+            model_flux = model_spec([self.params[self.model+'_params'][0][0], self.params[self.model+'_params'][1][0],
+                                     self.params[self.model+'_params'][2][0], self.params[self.model+'_params'][3][0]],
+                                    self.model)
             sol = (ppxf(model_flux, self.mast_flux, noise=self.yerr, velscale=var.velscale, start=var.start, degree=-1,
                         mdegree=var.mdegree, moments=var.moments, quiet=True))
             bestfit_model = sol.bestfit
-            self.ppxf_fit[model] = bestfit_model      # append fit to the ppxf fit dictionary
+            self.ppxf_fit[self.model] = bestfit_model      # append fit to the ppxf fit dictionary
             return self.ppxf_fit
         else:
-            model_flux = model_spec([self.params[model][0][0], self.params[model][1][0], self.params[model][2][0]],
-                                    model)
+            model_flux = model_spec([self.params[self.model+'_params'][0][0], self.params[self.model+'_params'][1][0],
+                                     self.params[self.model+'_params'][2][0]], self.model)
             sol = (ppxf(model_flux, self.mast_flux, noise=self.yerr, velscale=var.velscale, start=var.start, degree=-1,
                         mdegree=var.mdegree, moments=var.moments, quiet=True))
             bestfit_model = sol.bestfit
-            self.ppxf_fit[model] = bestfit_model  # append fit to the ppxf fit dictionary
+            self.ppxf_fit[self.model] = bestfit_model  # append fit to the ppxf fit dictionary
             return self.ppxf_fit
 
-    def get_chi2(self, model):
+    def get_chi2(self):
         """Get chi2 based on the point estimate parameters and append to chi dictionary for later comparison."""
-        self.chi[model] = np.sum(((self.mast_flux - self.ppxf_fit[model]) ** 2 / self.yerr ** 2)) / (len(self.mast_flux
-                                                                                                         - var.ndim))
+        chi = np.sum(((self.mast_flux - self.ppxf_fit[self.model]) ** 2 / self.yerr ** 2)) / (len(self.mast_flux
+                                                                                                  - var.ndim))
+        self.params[self.model + '_chi'] = chi
         return self.chi
 
-    def save_data(self, model):
+    def save_data(self):
         if not os.path.exists(var.output_direc):
             os.makedirs(var.output_direc)
-        np.savez(var.output_direc + str(self.pim) + '_' + model + '_params.npz', self.params[model], self.chi[model])
-        np.savez(var.output_direc + str(self.pim) + '_' + model + '_chains.npz', self.samples_cut)
+        # np.savez(var.output_direc + str(self.pim) + '_' + model + '_params.npz', self.params[model], self.chi[model])
+        # np.savez(var.output_direc + str(self.pim) + '_' + model + '_chains.npz', self.samples_cut)
+
+        with open(var.output_direc + str(self.pim) + '_' + self.model + '.pkl', 'wb') as f:
+            pickle.dump(self.params, f)
 
 
 class plotting:
@@ -821,26 +840,29 @@ class plotting:
         ax2 = divider.append_axes("bottom", size="36%", pad=0)
         axes.figure.add_axes(ax2)
         axes.plot(self.clean_spec.wave, self.clean_spec.corrected_flux_med, 'k', linewidth=3, label='MaStar spectrum')
-        axes.plot(self.clean_spec.wave, self.point_estimates.ppxf_fit['BOSZ'], c='b', lw=2, label='BOSZ model')
-        if len(self.point_estimates.ppxf_fit) == 2:      # check if there's a MARCS solution
-            axes.plot(self.clean_spec.wave, self.point_estimates.ppxf_fit['MARCS'], c='r', lw=2,
-                      label='MARCS model')
+        if self.model == 'BOSZ':
+            model_fit = self.point_estimates.ppxf_fit['BOSZ']
+        elif self.model == 'MARCS':
+            model_fit = self.point_estimates.ppxf_fit['MARCS']
+        axes.plot(self.clean_spec.wave, model_fit, c='b', lw=2, label=self.model+' model')
+        # if len(self.point_estimates.ppxf_fit) == 2:      # check if there's a MARCS solution
+        #     axes.plot(self.clean_spec.wave, self.point_estimates.ppxf_fit['MARCS'], c='r', lw=2,
+        #               label='MARCS model')
         axes.legend(loc=0, fontsize=20)
         axes.set_ylabel('Relative flux', fontsize=25)
         axes.tick_params(axis='both', which='major', labelsize=20, direction='in')
 
-        ax2.plot(self.clean_spec.wave, self.clean_spec.corrected_flux_med - self.point_estimates.ppxf_fit['BOSZ'],
-                 c='b', lw=2)
-        if len(self.point_estimates.ppxf_fit) == 2:      # check if there's a MARCS solution
-            ax2.plot(self.clean_spec.wave, self.clean_spec.corrected_flux_med - self.point_estimates.ppxf_fit['MARCS']
-                     , c='r', lw=2)
+        ax2.plot(self.clean_spec.wave, self.clean_spec.corrected_flux_med - model_fit, c='b', lw=2)
+        # if len(self.point_estimates.ppxf_fit) == 2:      # check if there's a MARCS solution
+        #     ax2.plot(self.clean_spec.wave, self.clean_spec.corrected_flux_med - self.point_estimates.ppxf_fit['MARCS']
+        #             , c='r', lw=2)
         ax2.set_ylabel('Residual flux', fontsize=25)
         ax2.set_xlabel(r'$Wavelength, \AA$', fontsize=25)
         ax2.tick_params(axis='both', which='major', labelsize=20, direction='in')
         ax2.axhline(y=0, c='r', linestyle='--', lw=2)
         axes.set_xticks([])
         plt.tight_layout()
-        plt.savefig(var.plots_output_direc + str(self.pim) + '/bestfit.png', bbox_inches='tight')
+        plt.savefig(var.plots_output_direc + str(self.pim) + '/' + self.model + '_bestfit.png', bbox_inches='tight')
         plt.close()
 
     def corner(self):
@@ -859,37 +881,37 @@ class plotting:
             ax = axes[i, i]
             if i == 0:
                 ax.set_title('$T_{eff} = %d^{+%d}_{-%d}$K' % (
-                    np.round(self.point_estimates.params[self.model][i][0], 0),
-                    np.round(self.point_estimates.params[self.model][i][2], 0),
-                    np.round(self.point_estimates.params[self.model][i][1], 0)), fontsize=14)
+                    np.round(self.point_estimates.params[self.model+'_params'][i][0], 0),
+                    np.round(self.point_estimates.params[self.model+'_params'][i][2], 0),
+                    np.round(self.point_estimates.params[self.model+'_params'][i][1], 0)), fontsize=14)
             if i == 1:
                 ax.set_title('$Log g = %6.2f^{+%6.2f}_{-%6.2f}$K' % (
-                    np.round(self.point_estimates.params[self.model][i][0], 2),
-                    np.round(self.point_estimates.params[self.model][i][2], 2),
-                    np.round(self.point_estimates.params[self.model][i][1], 2)), fontsize=14)
+                    np.round(self.point_estimates.params[self.model+'_params'][i][0], 2),
+                    np.round(self.point_estimates.params[self.model+'_params'][i][2], 2),
+                    np.round(self.point_estimates.params[self.model+'_params'][i][1], 2)), fontsize=14)
             if i == 2:
                 ax.set_title('$[Fe/H] = %6.2f^{+%6.2f}_{-%6.2f}$K' % (
-                    np.round(self.point_estimates.params[self.model][i][0], 2),
-                    np.round(self.point_estimates.params[self.model][i][2], 2),
-                    np.round(self.point_estimates.params[self.model][i][1], 2)), fontsize=14)
+                    np.round(self.point_estimates.params[self.model+'_params'][i][0], 2),
+                    np.round(self.point_estimates.params[self.model+'_params'][i][2], 2),
+                    np.round(self.point_estimates.params[self.model+'_params'][i][1], 2)), fontsize=14)
             if i == 3:
                 ax.set_title('$[alpha/M] = %6.2f^{+%6.2f}_{-%6.2f}$K' % (
-                    np.round(self.point_estimates.params[self.model][i][0], 2),
-                    np.round(self.point_estimates.params[self.model][i][2], 2),
-                    np.round(self.point_estimates.params[self.model][i][1], 2)), fontsize=14)
-            ax.axvline(self.point_estimates.params[self.model][i][0], color="r")
-            ax.axvline(self.point_estimates.params[self.model][i][0] - self.point_estimates.params[self.model][i][1],
-                       color="k", linestyle='--')
-            ax.axvline(self.point_estimates.params[self.model][i][0] + self.point_estimates.params[self.model][i][2],
-                       color="k", linestyle='--')
+                    np.round(self.point_estimates.params[self.model+'_params'][i][0], 2),
+                    np.round(self.point_estimates.params[self.model+'_params'][i][2], 2),
+                    np.round(self.point_estimates.params[self.model+'_params'][i][1], 2)), fontsize=14)
+            ax.axvline(self.point_estimates.params[self.model+'_params'][i][0], color="r")
+            ax.axvline(self.point_estimates.params[self.model+'_params'][i][0] -
+                       self.point_estimates.params[self.model+'_params'][i][1], color="k", linestyle='--')
+            ax.axvline(self.point_estimates.params[self.model+'_params'][i][0] +
+                       self.point_estimates.params[self.model+'_params'][i][2], color="k", linestyle='--')
 
         for yi in range(var.ndim):      # Loop over the histograms
             for xi in range(yi):
                 ax = axes[yi, xi]
-                ax.axvline(self.point_estimates.params[self.model][xi][0], color="r")
-                ax.axhline(self.point_estimates.params[self.model][yi][0], color="r")
-                ax.plot(self.point_estimates.params[self.model][xi][0], self.point_estimates.params[self.model][yi][0],
-                        "sr")
+                ax.axvline(self.point_estimates.params[self.model+'_params'][xi][0], color="r")
+                ax.axhline(self.point_estimates.params[self.model+'_params'][yi][0], color="r")
+                ax.plot(self.point_estimates.params[self.model+'_params'][xi][0],
+                        self.point_estimates.params[self.model+'_params'][yi][0], "sr")
 
         plt.tight_layout()
         plt.savefig(var.plots_output_direc + str(self.pim) + '/' + self.model + '_corner.png', bbox_inches='tight')

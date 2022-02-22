@@ -22,13 +22,14 @@ class spd_setup:
         self.save_params = True
 
         # mcmc params
+        self.early_stopping = True   # whether to measure convergence and stop when deemed comverged
         if self.alpha:
             self.ndim = 4
         else:
             self.ndim = 3
         self.nwalkers = 20
         self.burnin = 100
-        self.niter = 500
+        self.niter = 300
         self.a = 5
 
         # pPXF params

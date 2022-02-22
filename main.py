@@ -10,7 +10,7 @@ from spd_setup import spd_setup
 
 t0 = time.time()
 
-target_num = int(sys.argv[1])   # used to select array of spectra to analyse
+target_num = 0 # int(sys.argv[1])   # used to select array of spectra to analyse
 t0 = time.time()
 
 # instantiate params
@@ -41,20 +41,19 @@ for c, i in enumerate(targets[:1]):
         continue
 
     # run mcmc for BOSZ models
-    mcmc_run = mcmc(flux=clean_spec.corrected_flux_med, yerr=clean_spec.yerr, meta_data=mast_data.meta_data[c],
-                    parallel=True)
+    mcmc_run = mcmc(flux=clean_spec.corrected_flux_med, yerr=clean_spec.yerr, meta_data=mast_data.meta_data[c])
     mcmc_run.starting()     # starting values for walkers
     mcmc_run.sample(model='BOSZ')     # use emcee to sample param space
 
     # get point estimates from chains
-    point = point_estimates(clean_spec, mast_data.pim[c])
-    point.flatchain(mcmc_run, model='BOSZ')
-    point.params_err(model='BOSZ')
-    point.get_model_fit(model='BOSZ')
-    point.get_chi2(model='BOSZ')
+    point_bosz = point_estimates(clean_spec, mast_data.pim[c], model='BOSZ')
+    point_bosz.flatchain(mcmc_run)
+    point_bosz.params_err()
+    point_bosz.get_model_fit()
+    point_bosz.get_chi2()
+    point_bosz.save_data()
 
-    point.save_data(model='BOSZ')
-    plot_bosz = plotting(point, clean_spec, mast_data.pim[c], c, model='BOSZ')
+    plot_bosz = plotting(point_bosz, clean_spec, mast_data.pim[c], c, model='BOSZ')
 
     if mast_data.meta_data[c]['minTEFF_gaia'] > 5000:       # only use marcs for low Teff
         continue
@@ -63,12 +62,13 @@ for c, i in enumerate(targets[:1]):
     mcmc_run.sample(model='MARCS')  # use emcee to sample param space
 
     # get point estimates from chains
-    point.flatchain(mcmc_run, model='MARCS')
-    point.params_err(model='MARCS')
-    point.get_model_fit(model='MARCS')
-    point.get_chi2(model='MARCS')
+    point_marcs = point_estimates(clean_spec, mast_data.pim[c], model='MARCS')
+    point_marcs.flatchain(mcmc_run)
+    point_marcs.params_err()
+    point_marcs.get_model_fit()
+    point_marcs.get_chi2()
+    point_marcs.save_data()
 
-    point.save_data(model='MARCS')
-    plot_marcs = plotting(point, clean_spec, mast_data.pim[c], c, model='MARCS')
+    plot_marcs = plotting(point_marcs, clean_spec, mast_data.pim[c], c, model='MARCS')
 
 print('\nTotal time taken: ', time.time() - t0)
