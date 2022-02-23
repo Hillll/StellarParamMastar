@@ -311,6 +311,10 @@ class prepare_spectrum:
             idx = np.nonzero(ivar_)  # nonzero values in ivar
             f = interp1d(ivar_x[idx], ivar_[idx], fill_value='extrapolate')  # interp function with non zero values
             ivar_new = f(ivar_x)  # interpolate where zero values occur
+            if np.any(ivar_new < 0):    # sometime nans appear at end of error array. This fills them forward.
+                ivar_fill_value = ivar_new[np.where(ivar_new<0)[0][0]-1]
+                for i in np.where(ivar_new < 0)[0]:
+                    ivar_new[i] = ivar_new[np.where(ivar_new < 0)[0][0] - 1]
             sd = ivar_new ** -0.5  # change inverse variance to standard error
             sd_pcnt = sd / flux_new  # error as a percentage of the flux
 
