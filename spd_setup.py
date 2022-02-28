@@ -6,12 +6,12 @@ class spd_setup:
     def __init__(self):
         # directories
         self.data_direc = '/home/lewishill/PycharmProjects/SPD/input/'
-        self.output_direc = '/home/lewishill/PycharmProjects/SPD/output/'
-        self.plots_output_direc = '/home/lewishill/PycharmProjects/SPD/plots/'
+        self.output_direc = '/home/lewishill/PycharmProjects/SPD/output_interpLH/'
+        self.plots_output_direc = '/home/lewishill/PycharmProjects/SPD/plots/interp_LH/'
 
         self.spec_file = 'mastar-goodspec-v3_1_1-v1_7_7.fits'
         self.est_file = 'mastar-goodspec-mpl11-gaia-DT-v2-mpl11-v3_1_1-v1_7_5.fits'
-        self.nums_file = 'ids_todo.npz'   # ndarray of monotonically increasing values
+        self.nums_file = 'nums_todo.npz'   # ndarray of monotonically increasing values
 
         # input options
         self.alpha = True
@@ -28,8 +28,8 @@ class spd_setup:
         else:
             self.ndim = 3
         self.nwalkers = 20
-        self.burnin = 100
-        self.niter = 300
+        self.burnin = 200
+        self.niter = 2000
         self.a = 5
 
         # pPXF params

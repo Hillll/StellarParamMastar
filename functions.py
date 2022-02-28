@@ -5,7 +5,6 @@ os.environ["MKL_NUM_THREADS"] = "1"
 os.environ["NUMEXPR_NUM_THREADS"] = "1"
 os.environ["OMP_NUM_THREADS"] = "1"
 
-from pystellibs_SPD import Marcs_p0, Bosz
 import numpy as np
 import scipy
 import pandas as pd
@@ -25,42 +24,39 @@ import multiprocessing
 from multiprocessing import Pool
 from corner import corner
 import pickle
+from interp import interp_models
 
 var = spd_setup()
+
 if var.alpha:
     print('\nGetting models...')
-    from pystellibs_SPD import Marcs_m04, Marcs_p04
-    from pystellibs_SPD import Bosz_p03, Bosz_p05, Bosz_m03
+    marcs_m04 = interp_models('marcs_m04')
+    marcs_p04 = interp_models('marcs_p04')
 
-    marcs_m04 = Marcs_m04()
-    marcs_p04 = Marcs_p04()
+    bosz_m03 = interp_models('bosz_m03')
+    bosz_p03 = interp_models('bosz_p03')
+    bosz_p05 = interp_models('bosz_p05')
 
-    bosz_m03 = Bosz_m03()
-    bosz_p03 = Bosz_p03()
-    bosz_p05 = Bosz_p05()
-
-marcs_p0 = Marcs_p0()
-bosz_p0 = Bosz()
-
+marcs_p0 = interp_models('marcs_p0')
+bosz_p0 = interp_models('bosz_p0')
 
 def model_spec(theta, model):  # model given a set of parameters (theta)
     if var.alpha:
         t, g, z, a = theta
-        ap = (np.log10(t), g, 0, (10 ** (z)) * 0.02)  # try different normalisation
+        ap = (t, g, z)  # try different normalisation
         if model == 'bosz' or model == 'BOSZ':
-            flux_m03 = bosz_m03.generate_stellar_spectrum(*ap)  # get alpha model for each combination of t,g,z
-            flux_p0 = bosz_p0.generate_stellar_spectrum(*ap)
-            flux_p03 = bosz_p03.generate_stellar_spectrum(*ap)
-            flux_p05 = bosz_p05.generate_stellar_spectrum(*ap)
+            flux_m03 = bosz_m03.generate_stellar_spectrum(ap)  # get alpha model for each combination of t,g,z
+            flux_p0 = bosz_p0.generate_stellar_spectrum(ap)
+            flux_p03 = bosz_p03.generate_stellar_spectrum(ap)
+            flux_p05 = bosz_p05.generate_stellar_spectrum(ap)
             f = interp1d([-0.25, 0, 0.25, 0.5], np.array([flux_m03, flux_p0, flux_p03, flux_p05]), kind='linear',
                          axis=0)  # interpolate in alpha space
         elif model == 'marcs' or model == 'MARCS':
-            flux_m04 = marcs_m04.generate_stellar_spectrum(*ap)
-            flux_p0 = marcs_p0.generate_stellar_spectrum(*ap)
-            flux_p04 = marcs_p04.generate_stellar_spectrum(*ap)
+            flux_m04 = marcs_m04.generate_stellar_spectrum(ap)
+            flux_p0 = marcs_p0.generate_stellar_spectrum(ap)
+            flux_p04 = marcs_p04.generate_stellar_spectrum(ap)
             f = interp1d([-0.4, 0, 0.4], np.array([flux_m04, flux_p0, flux_p04]), kind='linear',
                          axis=0)  # interpolate in alpha space
-            flux = np.asarray(marcs_p0.generate_stellar_spectrum(*ap))
         else:
             raise Exception("Invalid model library.")
         flux_med = f(a) / np.median(f(a))

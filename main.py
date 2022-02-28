@@ -27,7 +27,7 @@ ebv_gaia = mast_data.meta_data['ebv']
 
 print('\nT1: ', time.time()-t0)
 
-for c, i in enumerate(targets[:1]):
+for c, i in enumerate(targets):
     print('Running spectrum: {}'.format(i), end='\r')
 
     # interpolate (if necessary), de-redden and median normalise spectrum
