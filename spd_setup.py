@@ -8,6 +8,7 @@ class spd_setup:
         self.data_direc = '/home/lewishill/PycharmProjects/SPD/input/'
         self.output_direc = '/home/lewishill/PycharmProjects/SPD/output_interpLH/'
         self.plots_output_direc = '/home/lewishill/PycharmProjects/SPD/plots/interp_LH/'
+        self.output_description = 'Test.'
 
         self.spec_file = 'mastar-goodspec-v3_1_1-v1_7_7.fits'
         self.est_file = 'mastar-goodspec-mpl11-gaia-DT-v2-mpl11-v3_1_1-v1_7_5.fits'
@@ -31,6 +32,7 @@ class spd_setup:
         self.burnin = 200
         self.niter = 2000
         self.a = 5
+        self.progress = True  # view progress in chains
 
         # pPXF params
         self.velscale = 69  # for SDSS spectra

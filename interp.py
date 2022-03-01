@@ -1,9 +1,8 @@
-import os, sys
+
 import numpy as np
 from scipy.interpolate import interp1d
 from scipy.interpolate import LinearNDInterpolator
 from astropy.io import fits
-import matplotlib.pyplot as plt
 
 class interp_models:
     """Interpolation of synthetic model spectra"""
@@ -115,16 +114,3 @@ class interp_models:
         f = interp1d(self.spec_low, self.spec_high)
         self.spec_interp = f(np.arange(len(self.spec_low)))
         return self.model_wave, self.spec_interp
-
-
-
-
-'''
-t1 = np.array([1,2,3,4,5,6,7,8,9,10])
-t2 = t1+5
-
-f = interp1d(t1, t2)
-plt.plot(t1)
-plt.plot(t2)
-plt.plot(f(np.arange(len(t1))))
-plt.show()'''
