@@ -10,19 +10,19 @@ from spd_setup import spd_setup
 
 t0 = time.time()
 
-target_num = 0 # int(sys.argv[1])   # used to select array of spectra to analyse
+target_num = int(sys.argv[1])   # used to select array of spectra to analyse
 t0 = time.time()
 
 # instantiate params
 var = spd_setup()
 
 # get mastar data and targets to analyse
-mast_data = load_data()
-targets = mast_data.get_targets(number=target_num)
-mast_data.get_mastar(start=targets[0], end=targets[-1])
+mast_data = load_data(number=target_num)
+targets = mast_data.get_targets()
+mast_data.get_mastar()
 
 # get estimates data
-mast_data.get_estimates(start=targets[0], end=targets[-1])
+mast_data.get_estimates()
 ebv_gaia = mast_data.meta_data['ebv']
 
 print('\nT1: ', time.time()-t0)

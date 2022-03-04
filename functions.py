@@ -77,33 +77,35 @@ def model_spec(theta, model):  # model given a set of parameters (theta)
 class load_data:
     """Load spectra and the estimates file from Gaia photometry."""
 
-    def __init__(self, data_direc=var.data_direc, spec_file=var.spec_file, est_file=var.est_file,
+    def __init__(self, number, data_direc=var.data_direc, spec_file=var.spec_file, est_file=var.est_file,
                  nums_file=var.nums_file):
+        self.number = number
         self.data_direc = data_direc
         self.spec_file = spec_file
         self.est_file = est_file
         self.nums_file = nums_file
 
 
-    def get_mastar(self, start=0, end=1000):
+    def get_mastar(self):
         header = fits.open(self.data_direc + self.spec_file)
         self.mangaid = header[1].data['mangaid']
-        self.plate_1, self.ifu_1, self.mjd_1 = header[1].data['plate'][start:end + 1], header[1].data['ifudesign'][
-                                                                                       start:end + 1], \
-                                               header[1].data['mjd'][start:end + 1]
-        self.ifu_1 = np.asarray([int(i) for i in self.ifu_1])   # ensure ifu is int
-        self.ra, self.dec = header[1].data['ra'][start:end + 1], header[1].data['dec'][start:end + 1]
-        self.wave, self.flux = header[1].data['wave'][0][9:-8], header[1].data['flux'][start:end + 1]
-        self.ivar, self.exptime = header[1].data['ivar'][start:end + 1], header[1].data['exptime'][start:end + 1]
+        self.plate_1, self.ifu_1, self.mjd_1 = header[1].data['plate'], header[1].data['ifudesign'], header[1].data[
+            'mjd']
+        self.ifu_1 = np.asarray([int(i) for i in self.ifu_1])  # ensure ifu is int
+        self.pim_all = np.array([int(str((self.plate_1[i])) + str((self.ifu_1[i])) + str((self.mjd_1[i]))) for i in
+                                 range(len(self.plate_1))])
+        self.mask = self.get_targets()
+        self.ra, self.dec = header[1].data['ra'][self.mask], header[1].data['dec'][self.mask]
+        self.wave, self.flux = header[1].data['wave'][0][9:-8], header[1].data['flux'][self.mask]
+        self.ivar, self.exptime = header[1].data['ivar'][self.mask], header[1].data['exptime'][self.mask]
         header.close()
 
-        self.pim = [int(str((self.plate_1[i])) + str((self.ifu_1[i])) + str((self.mjd_1[i]))) for i in
-                    range(len(self.plate_1))]
+        self.pim = self.pim_all[self.mask]
 
     def get_estimates(self, start=0, end=1000):
         # if not isinstance(plate, array)
         header = fits.open(self.data_direc + self.est_file)
-        self.meta_data = header[1].data[start:end + 1]
+        self.meta_data = header[1].data[self.mask]
         header.close()
 
         # apply some conditions to estimates
@@ -121,9 +123,9 @@ class load_data:
             if self.meta_data['maxLOGG_gaia'][i] > 5.5:
                 self.meta_data['maxLOGG_gaia'][i] = 6
 
-    def get_targets(self, number):
+    def get_targets(self):
         file = np.load(self.data_direc + self.nums_file)
-        return file['arr_0'][number]
+        return file['arr_0'][self.number]
 
     def get_solar(self):
         self.wave = np.load(var.data_direc + 'SOLAR_spec_mastar-res-nodegrade.npz')['arr_0']
@@ -719,7 +721,7 @@ class point_estimates:
         mode_err_up = (arviz.hdi(chain, 0.68)[1] - mode)
         return [mode, mode_err_dn, mode_err_up]
 
-    def params_err(self, teff='median', logg='mode', zh='mode', alpha='mode'):
+    def params_err(self, teff='median', logg='median', zh='mode', alpha='mode'):
         """calculate the median or mode of the distribution, depending on what is required.
         Also returns errors"""
         params_temp = []

@@ -12,7 +12,7 @@ class spd_setup:
 
         self.spec_file = 'mastar-goodspec-v3_1_1-v1_7_7.fits'
         self.est_file = 'mastar-goodspec-mpl11-gaia-DT-v2-mpl11-v3_1_1-v1_7_5.fits'
-        self.nums_file = 'nums_todo.npz'   # ndarray of monotonically increasing values
+        self.nums_file = 'nums_non_contiguous.npz'   # ndarray of indices to do from self.spec_file
 
         # input options
         self.alpha = True
