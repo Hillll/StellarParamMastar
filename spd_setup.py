@@ -16,11 +16,13 @@ class spd_setup:
 
         # input options
         self.alpha = True
+        self.min_lambda = 3800  # set wavelength lower limit. If -999 then minimum lambda is used.
+        self.max_lambda = 5000  # set wavelength upper limit. If -999 then maximum lambda is used.
 
         # output options
-        self.plot = True
-        self.save_chains = False
-        self.save_params = True
+        self.plot = True    # Whether to plot the results
+        self.save_chains = False    # To save the MCMC chains
+        self.save_params = True     # To save the output params
 
         # mcmc params
         self.early_stopping = True   # whether to measure convergence and stop when deemed comverged
@@ -28,14 +30,14 @@ class spd_setup:
             self.ndim = 4
         else:
             self.ndim = 3
-        self.nwalkers = 20
-        self.burnin = 200
-        self.niter = 2000
-        self.a = 5
+        self.nwalkers = 20  # N MCMC walkers
+        self.burnin = 100   # Length of burn in iterations
+        self.niter = 100    # Length of iterations that will be used in the posterior
+        self.a = 5          # Emcee acceptance fraction of walkers
         self.progress = True  # view progress in chains
 
         # pPXF params
         self.velscale = 69  # for SDSS spectra
         self.start = [0, 10]  # initial guess for velocities
-        self.mdegree = 6
-        self.moments = 2
+        self.mdegree = 6    # Multiplicative polynomial order
+        self.moments = 2    # Fit for V and sigma

@@ -10,7 +10,7 @@ from spd_setup import spd_setup
 
 t0 = time.time()
 
-target_num = int(sys.argv[1])   # used to select array of spectra to analyse
+target_num = 0 #int(sys.argv[1])   # used to select array of spectra to analyse
 t0 = time.time()
 
 # instantiate params
@@ -19,7 +19,7 @@ var = spd_setup()
 # get mastar data and targets to analyse
 mast_data = load_data(number=target_num)
 targets = mast_data.get_targets()
-mast_data.get_mastar()
+mast_data.get_mastar_test()
 
 # get estimates data
 mast_data.get_estimates()
@@ -31,7 +31,7 @@ for c, i in enumerate(targets):
     print('Running spectrum: {}'.format(i), end='\r')
 
     # interpolate (if necessary), de-redden and median normalise spectrum
-    clean_spec = prepare_spectrum(wave=mast_data.wave, flux=mast_data.flux[c][9:-8], ivar=mast_data.ivar[c],
+    clean_spec = prepare_spectrum(wave=mast_data.wave, flux=mast_data.flux[c], ivar=mast_data.ivar[c],
                                   ebv=ebv_gaia[c], spec_id=c)
     clean_spec.get_med_data()
     print('\nT2: ', time.time() - t0)
