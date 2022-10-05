@@ -1,28 +1,21 @@
 import sys
-
 import os
 os.environ["MKL_NUM_THREADS"] = "1"
 os.environ["NUMEXPR_NUM_THREADS"] = "1"
 os.environ["OMP_NUM_THREADS"] = "1"
 
 import numpy as np
-import pandas as pd
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
-import random
-import time
-import arviz, scipy
+import random, pickle, time, arviz, scipy
+import emcee, multiprocessing
 from math import pi
 from spd_setup import spd_setup
 from astropy.io import fits
 from scipy.interpolate import interp1d
-# from firefly_dust import reddening_fm
 from ppxf.ppxf import ppxf
-import emcee
-import multiprocessing
 from multiprocessing import Pool
 from corner import corner
-import pickle
 from interp import interp_models
 
 var = spd_setup()
@@ -39,21 +32,22 @@ if var.alpha:
 marcs_p0 = interp_models('marcs_p0')
 bosz_p0 = interp_models('bosz_p0')
 
+
 def model_spec(theta, model):  # model given a set of parameters (theta)
     if var.alpha:
         t, g, z, a = theta
         ap = (t, g, z)
         if model == 'bosz' or model == 'BOSZ':
-            flux_m03 = bosz_m03.generate_stellar_spectrum(ap)  # get alpha model for each combination of t,g,z
-            flux_p0 = bosz_p0.generate_stellar_spectrum(ap)
-            flux_p03 = bosz_p03.generate_stellar_spectrum(ap)
-            flux_p05 = bosz_p05.generate_stellar_spectrum(ap)
+            flux_m03 = bosz_m03.generate_stellar_spectrum(ap)[lambda_mask]  # get alpha model for each combination of t,g,z
+            flux_p0 = bosz_p0.generate_stellar_spectrum(ap)[lambda_mask]
+            flux_p03 = bosz_p03.generate_stellar_spectrum(ap)[lambda_mask]
+            flux_p05 = bosz_p05.generate_stellar_spectrum(ap)[lambda_mask]
             f = interp1d([-0.25, 0, 0.25, 0.5], np.array([flux_m03, flux_p0, flux_p03, flux_p05]), kind='linear',
                          axis=0)  # interpolate in alpha space
         elif model == 'marcs' or model == 'MARCS':
-            flux_m04 = marcs_m04.generate_stellar_spectrum(ap)
-            flux_p0 = marcs_p0.generate_stellar_spectrum(ap)
-            flux_p04 = marcs_p04.generate_stellar_spectrum(ap)
+            flux_m04 = marcs_m04.generate_stellar_spectrum(ap)[lambda_mask]
+            flux_p0 = marcs_p0.generate_stellar_spectrum(ap)[lambda_mask]
+            flux_p04 = marcs_p04.generate_stellar_spectrum(ap)[lambda_mask]
             f = interp1d([-0.4, 0, 0.4], np.array([flux_m04, flux_p0, flux_p04]), kind='linear',
                          axis=0)  # interpolate in alpha space
         else:
@@ -62,7 +56,7 @@ def model_spec(theta, model):  # model given a set of parameters (theta)
         return flux_med
 
     else:
-        t, g, z, a = theta
+        t, g, z = theta
         ap = (t, g, z)
         if model == 'bosz' or model == 'BOSZ':
             flux = bosz_p0.generate_stellar_spectrum(ap)
@@ -70,7 +64,7 @@ def model_spec(theta, model):  # model given a set of parameters (theta)
             flux = marcs_p0.generate_stellar_spectrum(ap)
         else:
             raise Exception("Invalid model library.")
-        flux_med = flux / np.median(flux)
+        flux_med = flux[lambda_mask] / np.median(flux[lambda_mask])
         return flux_med
 
 
@@ -85,7 +79,6 @@ class load_data:
         self.est_file = est_file
         self.nums_file = nums_file
 
-
     def get_mastar(self):
         header = fits.open(self.data_direc + self.spec_file)
         self.mangaid = header[1].data['mangaid']
@@ -94,18 +87,34 @@ class load_data:
         self.ifu_1 = np.asarray([int(i) for i in self.ifu_1])  # ensure ifu is int
         self.pim_all = np.array([int(str((self.plate_1[i])) + str((self.ifu_1[i])) + str((self.mjd_1[i]))) for i in
                                  range(len(self.plate_1))])
-        self.mask = self.get_targets()
-        self.ra, self.dec = header[1].data['ra'][self.mask], header[1].data['dec'][self.mask]
-        self.wave, self.flux = header[1].data['wave'][0][9:-8], header[1].data['flux'][self.mask]
-        self.ivar, self.exptime = header[1].data['ivar'][self.mask], header[1].data['exptime'][self.mask]
+        self.target_mask = self.get_targets()
+        self.ra, self.dec = header[1].data['ra'][self.target_mask], header[1].data['dec'][self.target_mask]
+        self.wave = header[1].data['wave'][0][9:-8]  # remove start and end pixels as downgrading the models gives bad pixels here
+
+        global lambda_mask
+        if var.min_lambda == -999 and var.max_lambda == -999:
+            lambda_mask = np.where(self.wave > var.max_lambda)[0]
+        elif var.min_lambda == -999 and var.max_lambda != -999:
+            lambda_mask = np.where(self.wave <= var.max_lambda)[0]
+        elif var.min_lambda != -999 and var.max_lambda == -999:
+            lambda_mask = np.where(var.min_lambda >= self.wave)[0]
+        else:
+            lambda_mask = np.where((self.wave >= var.min_lambda) & (self.wave <= var.max_lambda))
+
+        self.flux = header[1].data['flux'][self.target_mask]
+        self.flux = np.asarray([i[lambda_mask] for i in self.flux])
+        self.wave = self.wave[lambda_mask]
+        self.ivar, self.exptime = header[1].data['ivar'][self.target_mask], header[1].data['exptime'][self.target_mask]
+        self.ivar = np.asarray([i[lambda_mask] for i in self.ivar])
         header.close()
 
-        self.pim = self.pim_all[self.mask]
+        self.pim = self.pim_all[self.target_mask]
 
     def get_estimates(self, start=0, end=1000):
         # if not isinstance(plate, array)
         header = fits.open(self.data_direc + self.est_file)
-        self.meta_data = header[1].data[self.mask]
+        pim_mask = [np.where(header[1].data['pim'] == i)[0][0] for i in self.pim]
+        self.meta_data = header[1].data[pim_mask]
         header.close()
 
         # apply some conditions to estimates
@@ -304,7 +313,7 @@ class prepare_spectrum:
 
             corrected_flux = self.dered(flux_to_dered=flux_new)  # call the dered fn that returns de-reddened spectrum
 
-            ivar_ = self.ivar[9:-8]  # get inverse variance
+            ivar_ = self.ivar  # get inverse variance
             ivar_x = np.arange(len(ivar_))
             idx = np.nonzero(ivar_)  # nonzero values in ivar
             f = interp1d(ivar_x[idx], ivar_[idx], fill_value='extrapolate')  # interp function with non zero values
@@ -319,7 +328,7 @@ class prepare_spectrum:
             self.corrected_flux_med = corrected_flux / np.median(corrected_flux)  # median normalise
             self.yerr = self.corrected_flux_med * sd_pcnt
         else:
-            ivar_ = self.ivar[9:-8]  # get inverse variance
+            ivar_ = self.ivar  # get inverse variance
             ivar_x = np.arange(len(ivar_))
             idx = np.nonzero(ivar_)  # nonzero values in ivar
             f = interp1d(ivar_x[idx], ivar_[idx], fill_value='extrapolate')  # interp function with non zero values
@@ -366,7 +375,7 @@ class prepare_spectrum_solar:
 
 
 class mcmc_solar:
-    """The functions required for running emcee."""
+    """The functions required for running emcee with solar spectrum."""
 
     def __init__(self, flux, yerr, parallel=True):
         self.sample_all = {}
@@ -836,8 +845,8 @@ class plotting:
 
     def bestfit(self):
         """Plot bestfit for model spec"""
-        fig, axes = plt.subplots(nrows=1, ncols=1, figsize=(30, 12), sharey=False, sharex=True)
-        axes.set_title('MaStar PIM: ' + str(self.pim), fontsize=32)
+        fig, axes = plt.subplots(nrows=1, ncols=1, figsize=(20, 8), sharey=False, sharex=True)
+        axes.set_title('MaStar PIM: ' + str(self.pim), fontsize=25)
         divider = make_axes_locatable(axes)
         ax2 = divider.append_axes("bottom", size="36%", pad=0)
         axes.figure.add_axes(ax2)
@@ -859,7 +868,7 @@ class plotting:
         #     ax2.plot(self.clean_spec.wave, self.clean_spec.corrected_flux_med - self.point_estimates.ppxf_fit['MARCS']
         #             , c='r', lw=2)
         ax2.set_ylabel('Residual flux', fontsize=25)
-        ax2.set_xlabel(r'$Wavelength, \AA$', fontsize=25)
+        ax2.set_xlabel(r'Wavelength, $\AA$', fontsize=25)
         ax2.tick_params(axis='both', which='major', labelsize=20, direction='in')
         ax2.axhline(y=0, c='r', linestyle='--', lw=2)
         axes.set_xticks([])
@@ -871,33 +880,33 @@ class plotting:
         """Plot corner."""
         plt.clf()
         if var.alpha:
-            fig = corner(self.point_estimates.samples_clean, labels=["$T_{eff}$", "$log g$", "$[Fe/H]$", "[alpha/M]"],
+            fig = corner(self.point_estimates.samples_clean, labels=["$T_{\mathrm{eff}}$", "log $g$", "[Fe/H]", r"[$\alpha$/Fe]"],
                          quantiles=None, show_titles=False, title_kwargs={"fontsize": 16},
                          label_kwargs={"fontsize": 18}, color='b')
         else:
-            fig = corner(self.point_estimates.samples_clean, labels=["$T_{eff}$", "$log g$", "$[Fe/H]$"],
+            fig = corner(self.point_estimates.samples_clean, labels=["$T_{\mathrm{eff}}$", "log $g$", "[Fe/H]"],
                          quantiles=None, show_titles=False, title_kwargs={"fontsize": 16},
                          label_kwargs={"fontsize": 18}, color='b')
         axes = np.array(fig.axes).reshape((var.ndim, var.ndim))   # Extract the axes
         for i in range(var.ndim):       # Loop over the diagonal
             ax = axes[i, i]
             if i == 0:
-                ax.set_title('$T_{eff} = %d^{+%d}_{-%d}$K' % (
+                ax.set_title('$T_{\mathrm{eff}} = %d^{+%d}_{-%d}$K' % (
                     np.round(self.point_estimates.params[self.model+'_params'][i][0], 0),
                     np.round(self.point_estimates.params[self.model+'_params'][i][2], 0),
                     np.round(self.point_estimates.params[self.model+'_params'][i][1], 0)), fontsize=14)
             if i == 1:
-                ax.set_title('$Log g = %6.2f^{+%6.2f}_{-%6.2f}$K' % (
+                ax.set_title('log $g = %6.2f^{+%6.2f}_{-%6.2f}$' % (
                     np.round(self.point_estimates.params[self.model+'_params'][i][0], 2),
                     np.round(self.point_estimates.params[self.model+'_params'][i][2], 2),
                     np.round(self.point_estimates.params[self.model+'_params'][i][1], 2)), fontsize=14)
             if i == 2:
-                ax.set_title('$[Fe/H] = %6.2f^{+%6.2f}_{-%6.2f}$K' % (
+                ax.set_title('[Fe/H] $= %6.2f^{+%6.2f}_{-%6.2f}$' % (
                     np.round(self.point_estimates.params[self.model+'_params'][i][0], 2),
                     np.round(self.point_estimates.params[self.model+'_params'][i][2], 2),
                     np.round(self.point_estimates.params[self.model+'_params'][i][1], 2)), fontsize=14)
             if i == 3:
-                ax.set_title('$[alpha/M] = %6.2f^{+%6.2f}_{-%6.2f}$K' % (
+                ax.set_title(r'[$\alpha$/Fe] $= %6.2f^{+%6.2f}_{-%6.2f}$' % (
                     np.round(self.point_estimates.params[self.model+'_params'][i][0], 2),
                     np.round(self.point_estimates.params[self.model+'_params'][i][2], 2),
                     np.round(self.point_estimates.params[self.model+'_params'][i][1], 2)), fontsize=14)

@@ -7,14 +7,11 @@ import numpy as np
 import sys, time
 from functions import load_data, prepare_spectrum, mcmc, point_estimates, plotting
 from spd_setup import spd_setup
-
 t0 = time.time()
 
 target_num = int(sys.argv[1])   # used to select array of spectra to analyse
-t0 = time.time()
 
-# instantiate params
-var = spd_setup()
+var = spd_setup()   # instantiate params
 
 # get mastar data and targets to analyse
 mast_data = load_data(number=target_num)
@@ -25,16 +22,14 @@ mast_data.get_mastar()
 mast_data.get_estimates()
 ebv_gaia = mast_data.meta_data['ebv']
 
-print('\nT1: ', time.time()-t0)
-
+print(targets)
 for c, i in enumerate(targets):
-    print('Running spectrum: {}'.format(i), end='\r')
+    print('Running spectrum: {}'.format(mast_data.pim[c]))
 
     # interpolate (if necessary), de-redden and median normalise spectrum
-    clean_spec = prepare_spectrum(wave=mast_data.wave, flux=mast_data.flux[c][9:-8], ivar=mast_data.ivar[c],
+    clean_spec = prepare_spectrum(wave=mast_data.wave, flux=mast_data.flux[c], ivar=mast_data.ivar[c],
                                   ebv=ebv_gaia[c], spec_id=c)
     clean_spec.get_med_data()
-    print('\nT2: ', time.time() - t0)
 
     if clean_spec.catch_remaining(meta_data=mast_data.meta_data[c]):
         # save data to blank file
@@ -56,7 +51,7 @@ for c, i in enumerate(targets):
     plot_bosz = plotting(point_bosz, clean_spec, mast_data.pim[c], c, model='BOSZ')
 
     if mast_data.meta_data[c]['minTEFF_gaia'] > 5000:       # only use marcs for low Teff
-        continue
+        continue    # continue to next spectrum in for loop
 
     # run mcmc for MARCS models
     mcmc_run.sample(model='MARCS')  # use emcee to sample param space

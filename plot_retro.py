@@ -1,6 +1,6 @@
 """Retrospectively plot the fits, corner and trace of an MCMC run"""
 
-from plotting_retro import load_data, prepare_spectrum, plotting, point_estimates
+from plotting_retro_class import load_data, prepare_spectrum, plotting, point_estimates
 import glob, pickle
 import numpy as np
 
