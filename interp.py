@@ -1,4 +1,3 @@
-
 import numpy as np
 from scipy.interpolate import interp1d
 from scipy.interpolate import LinearNDInterpolator
@@ -76,8 +75,6 @@ class interp_models:
 
     def generate_stellar_spectrum(self, theta):
         return interp_models.get_spec(theta=theta, func=self.func)
-
-
 
 
     def find_nodes(self, theta):
